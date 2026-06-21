@@ -18,6 +18,7 @@ struct TrackBackground: View {
                     .frame(height: 200)
             }
             .ignoresSafeArea()
+            .opacity(0.9)
     }
 }
 

@@ -5,8 +5,10 @@
 //  Created by Felix on 12.06.26.
 //
 
-enum SoundTheme: String {
+enum SoundTheme: String, Codable, CaseIterable, Identifiable {
     case eng1
+    
+    var id: Self { self }
     
     var displayName: String {
         switch self {

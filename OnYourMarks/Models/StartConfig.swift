@@ -7,26 +7,36 @@
 
 struct StartConfig: Codable {
     var sliderReadyClamp: Double = 20
-    var timeToReady: Double = 5 {
-        didSet { timeToReady = timeToReady.clamped(to: 0...sliderReadyClamp) }
+    var blockTimeToReady: Double = 2 {
+        didSet { blockTimeToReady = blockTimeToReady.clamped(to: 0...sliderReadyClamp) }
+    }
+    var standingTimeToReady: Double = 2 {
+        didSet { standingTimeToReady = standingTimeToReady.clamped(to: 0...sliderReadyClamp) }
     }
     
     var sliderSetClamp: Double = 30
-    var timeToSet: Double = 10 {
-        didSet { timeToSet = timeToSet.clamped(to: 0...sliderSetClamp) }
+    var blockTimeToSet: Double = 12 {
+        didSet { blockTimeToSet = blockTimeToSet.clamped(to: 0...sliderSetClamp) }
     }
     
     var sliderStartMinClamp: Double = 10
-    var timeToStartMin: Double = 2 {
-        didSet { timeToStartMin = timeToStartMin.clamped(to: 0...sliderStartMinClamp) }
+    var blockTimeToStartMin: Double = 1 {
+        didSet { blockTimeToStartMin = blockTimeToStartMin.clamped(to: 0...sliderStartMinClamp) }
+    }
+    var standingTimeToStartMin: Double = 1 {
+        didSet { standingTimeToStartMin = standingTimeToStartMin.clamped(to: 0...sliderStartMinClamp) }
     }
     
     var sliderStartMaxClamp: Double = 10
-    var timeToStartMax: Double = 5 {
-        didSet { timeToStartMax = timeToStartMax.clamped(to: 0...sliderStartMaxClamp) }
+    var blockTimeToStartMax: Double = 2 {
+        didSet { blockTimeToStartMax = blockTimeToStartMax.clamped(to: 0...sliderStartMaxClamp) }
+    }
+    var standingTimeToStartMax: Double = 2 {
+        didSet { standingTimeToStartMax = standingTimeToStartMax.clamped(to: 0...sliderStartMaxClamp) }
     }
     
     var startType: StartType = StartType.block
+    var soundTheme: SoundTheme = SoundTheme.eng1
     
     static let standard = StartConfig()
     
@@ -37,11 +47,18 @@ struct StartConfig: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = StartConfig.standard   // Defaults as fallback
 
-        startType      = try c.decodeIfPresent(StartType.self,  forKey: .startType)      ?? d.startType
-        timeToReady    = try c.decodeIfPresent(Double.self,     forKey: .timeToReady)    ?? d.timeToReady
-        timeToSet      = try c.decodeIfPresent(Double.self,     forKey: .timeToSet)      ?? d.timeToSet
-        timeToStartMin = try c.decodeIfPresent(Double.self,     forKey: .timeToStartMin) ?? d.timeToStartMin
-        timeToStartMax = try c.decodeIfPresent(Double.self,     forKey: .timeToStartMax) ?? d.timeToStartMax
+        startType = try c.decodeIfPresent(StartType.self, forKey: .startType) ?? d.startType
+        
+        blockTimeToReady = try c.decodeIfPresent(Double.self, forKey: .blockTimeToReady) ?? d.blockTimeToReady
+        blockTimeToSet = try c.decodeIfPresent(Double.self, forKey: .blockTimeToSet) ?? d.blockTimeToSet
+        blockTimeToStartMin = try c.decodeIfPresent(Double.self, forKey: .blockTimeToStartMin) ?? d.blockTimeToStartMin
+        blockTimeToStartMax = try c.decodeIfPresent(Double.self, forKey: .blockTimeToStartMax) ?? d.blockTimeToStartMax
+        
+        standingTimeToReady = try c.decodeIfPresent(Double.self, forKey: .standingTimeToReady) ?? d.standingTimeToReady
+        standingTimeToStartMin = try c.decodeIfPresent(Double.self, forKey: .standingTimeToStartMin) ?? d.standingTimeToStartMin
+        standingTimeToStartMax = try c.decodeIfPresent(Double.self, forKey: .standingTimeToStartMax) ?? d.standingTimeToStartMax
+        
+        soundTheme = try c.decodeIfPresent(SoundTheme.self, forKey: .soundTheme) ?? d.soundTheme
     }
     
 }

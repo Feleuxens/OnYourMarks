@@ -24,7 +24,6 @@ struct StartControls: View {
 }
 
 
-// Views/Components/PillButtonStyle.swift
 struct PillButtonStyle: ButtonStyle {
     var fill: Color
     var text: Color = .warmInk
@@ -36,6 +35,6 @@ struct PillButtonStyle: ButtonStyle {
             .frame(minWidth: 120)
             .foregroundStyle(text)
             .background(fill, in: RoundedRectangle(cornerRadius: 12))
-            .opacity(configuration.isPressed ? 0.8 : 1)   // Druck-Feedback gratis
+            .opacity(configuration.isPressed ? 0.8 : 1)   // Press feedback
     }
 }

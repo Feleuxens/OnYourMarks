@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct DelaySlider: View {
+    let title: String
     @Binding var time: Double
     let isRunning: Bool
     let range: ClosedRange<Double>
@@ -15,25 +16,21 @@ struct DelaySlider: View {
     var isFocused: FocusState<Bool>.Binding
     
     var body: some View {
-        HStack {
-            Slider(value: $time, in: range, step: step).tint(.signalYellow).disabled(isRunning)
-            HStack(spacing: 4) {
-                TextField("0.0", value: $time, format: .number)
-                    .multilineTextAlignment(.trailing)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer()
+                TextField("", value: $time, format: .number)
                     .keyboardType(.decimalPad)
-                    .frame(width: 26)
                     .focused(isFocused)
-                    .foregroundStyle(.warmInk)
-                Text("s").foregroundStyle(.graphite)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 44)
+                    .monospacedDigit()
+                    .onTapGesture { isFocused.wrappedValue = true }
+                Text("s").foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.warmPaper))
-            .contentShape(Rectangle())
-            .onTapGesture { isFocused.wrappedValue = true }
-            .opacity(!isRunning ? 1 : 0.5)
-            
-        }.padding(.horizontal, 14)
+            Slider(value: $time, in: range, step: step).tint(.signalYellow)
+        }
     }
 }
 

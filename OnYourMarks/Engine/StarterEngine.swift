@@ -27,26 +27,24 @@ final class StarterEngine {
         switch type {
         case .block:
             return [
-                Phase(state: .preparing, duration: config.timeToReady, signal: nil),
+                Phase(state: .preparing, duration: config.blockTimeToReady, signal: nil),
                 Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
-                Phase(state: .waitForSet, duration: config.timeToSet, signal: nil),
+                Phase(state: .waitForSet, duration: config.blockTimeToSet, signal: nil),
                 Phase(state: .set, duration: nil, signal: Signal.set),
-                Phase(state: .waitForStart, duration: randomTimeToStart(config), signal: nil),
+                Phase(state: .waitForStart, duration: randomTimeToStart(config.blockTimeToStartMin, config.blockTimeToStartMax), signal: nil),
                 Phase(state: .start, duration: nil, signal: Signal.go),
             ]
         case .standing:
             return [
-                Phase(state: .preparing, duration: config.timeToReady, signal: nil),
+                Phase(state: .preparing, duration: config.standingTimeToReady, signal: nil),
                 Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
-                Phase(state: .waitForStart, duration: randomTimeToStart(config), signal: nil),
+                Phase(state: .waitForStart, duration: randomTimeToStart(config.standingTimeToStartMin, config.standingTimeToStartMax), signal: nil),
                 Phase(state: .start, duration: nil, signal: Signal.go),
             ]
         }
     }
 
-    private func randomTimeToStart(_ config: StartConfig) -> TimeInterval {
-        let a = config.timeToStartMin
-        let b = config.timeToStartMax
+    private func randomTimeToStart(_ a: Double, _ b: Double) -> TimeInterval {
         return Double.random(in: min(a, b)...max(a, b))
     }
 
