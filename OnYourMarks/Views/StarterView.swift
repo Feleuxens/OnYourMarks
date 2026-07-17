@@ -10,6 +10,10 @@ import SwiftUI
 struct StarterView: View {
     @Bindable var vm = StarterViewModel()
     
+    private var shouldStayAwake: Bool {
+        vm.cameraEnabled || vm.isRunning
+    }
+    
     var body: some View {
         NavigationStack {
             
@@ -17,6 +21,28 @@ struct StarterView: View {
                 TrackBackground()
                 VStack {
                     StartTypeSelector(selection: $vm.config.startType).disabled(vm.isRunning)
+                    
+                    Spacer()
+                    Group {
+                        if vm.cameraEnabled {
+                            CameraPreview(session: vm.cameraDetector.session,
+                                          joints: vm.cameraDetector.detectedJoints)
+                                .aspectRatio(3/4, contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                        } else {
+                            CameraPlaceholder()
+                        }
+                    }
+                    .aspectRatio(3/4, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(alignment: .bottom) {
+                        CameraToggleButton(isOn: vm.cameraEnabled) {
+                            if vm.cameraEnabled { vm.disableCamera() }
+                            else { vm.enableCamera() }
+                        }
+                        .padding(.bottom, 8)
+                    }
+                    
                     Spacer()
                     
                     StartControls(
@@ -25,7 +51,7 @@ struct StarterView: View {
                         onAbort: { vm.abort() }
                     )
                     .frame(maxWidth: .infinity)
-                    
+    
                     
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -43,6 +69,12 @@ struct StarterView: View {
             }
             .tint(.chalk)
             .toolbarColorScheme(.light, for: .automatic)
+        }
+        .onChange(of: shouldStayAwake) { _, stayAwake in
+            UIApplication.shared.isIdleTimerDisabled = stayAwake
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
     

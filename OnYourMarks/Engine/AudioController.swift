@@ -82,5 +82,6 @@ enum Signal: CaseIterable {
 
 protocol SignalPlayer {
     func play(_ signal: Signal)
+    func playRecall(times: Int, gap: TimeInterval)
     func duration(of signal: Signal) -> TimeInterval
 }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Foundation
+import QuartzCore
 
 @Observable
 class StarterViewModel {
@@ -16,6 +17,12 @@ class StarterViewModel {
     private let player: AudioController
     private var task: Task<Void, Never>?
     
+    let cameraDetector = CameraMovementDetector()
+    var shotTime: TimeInterval?
+    var lastResult: ReactionResult?
+    var falseStartActive = false
+    var cameraEnabled = false
+    
     var isRunning: Bool {
         engine.state != .idle
     }
@@ -24,7 +31,7 @@ class StarterViewModel {
         self.config = ConfigStore().load()
         let player = AudioController()
         self.player = player
-        self.engine = StarterEngine(player: player)
+        self.engine = StarterEngine(player: player, movementDetector: cameraDetector)
     }
     
     func start() {
@@ -46,5 +53,19 @@ class StarterViewModel {
     
     func resetConfig() {
         config = .standard
+    }
+
+    func enableCamera() {
+        Task {
+            guard await CameraPermission.request() else { return }
+            cameraEnabled = true
+            cameraDetector.startSession()
+        }
+    }
+    
+    func disableCamera() {
+        cameraEnabled = false
+        cameraDetector.stopMonitoring()
+        cameraDetector.stopSession()
     }
 }

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import QuartzCore
 
 struct Phase: Equatable {
     let state: StarterState
@@ -18,9 +19,43 @@ struct Phase: Equatable {
 final class StarterEngine {
     private(set) var state: StarterState = .idle
     private let player: SignalPlayer
+    private let movementDetector: MovementDetector
+    private(set) var lastReactionTime: TimeInterval?
+    
+    private var shotTime: TimeInterval? = nil
 
-    init(player: SignalPlayer) {
+    init(player: SignalPlayer, movementDetector: MovementDetector) {
         self.player = player
+        self.movementDetector = movementDetector
+        self.movementDetector.onMovement = { [weak self] moveTime in
+                self?.handleMovement(at: moveTime)
+            }
+    }
+    
+    private func handleMovement(at moveTime: TimeInterval) {
+        guard state == .waitForStart || state == .start else { return }
+
+        switch shotTime {
+        case nil:
+            print("False start")
+            triggerFalseStart()
+
+        case let shot?:
+            let reaction = moveTime - shot
+            if reaction < 0.100 {
+                print("Reaction time \(reaction)")
+                triggerFalseStart()
+            } else {
+                lastReactionTime = reaction
+                movementDetector.stopMonitoring()
+            }
+        }
+    }
+    
+    private func triggerFalseStart() {
+        state = .idle
+        movementDetector.stopMonitoring()
+        player.playRecall(times: 3, gap: 0.35)
     }
     
     func buildSequence(for type: StartType, config: StartConfig) -> [Phase] {
@@ -49,27 +84,32 @@ final class StarterEngine {
     }
 
     func start(type: StartType, config: StartConfig) async {
+        shotTime = nil
         let phases = buildSequence(for: config.startType, config: config)
+
         for phase in phases {
+            if Task.isCancelled { break }
+
             state = phase.state
-            do {
-                if Task.isCancelled {
-                    state = .idle
-                    return
-                }
-                if let duration = phase.duration {
-                    try await Task.sleep(for: .seconds(duration))
-                } else if let signal = phase.signal {
-                    player.play(signal)
-                    try? await Task.sleep(for: .seconds(player.duration(of: signal)))
-                }
-            } catch {
-                state = .idle
+
+            if state == .waitForStart { movementDetector.startMonitoring() }
+            if state == .start { shotTime = CACurrentMediaTime() }
+
+            if let duration = phase.duration {
+                do { try await Task.sleep(for: .seconds(duration)) }
+                catch { break }
+            } else if let signal = phase.signal {
+                player.play(signal)
+                try? await Task.sleep(for: .seconds(player.duration(of: signal)))
             }
         }
-    }
 
+        state = .idle
+        movementDetector.stopMonitoring()
+    }
+    
     func reset() {
         state = .idle
+        movementDetector.stopMonitoring()
     }
 }
