@@ -29,9 +29,11 @@ class StarterViewModel {
     
     func start() {
         configStore.save(config)
+        player.activateSession()
         task = Task {
             await engine.start(type: config.startType, config: config)
             engine.reset()
+            player.deactivateSession()
         }
     }
     
@@ -39,6 +41,7 @@ class StarterViewModel {
         task?.cancel()
         task = nil
         engine.reset()
+        player.deactivateSession()
     }
     
     func resetConfig() {

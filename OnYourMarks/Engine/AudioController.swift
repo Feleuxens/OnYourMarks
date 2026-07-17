@@ -22,9 +22,20 @@ final class AudioController: SignalPlayer {
     init(theme: SoundTheme = .eng1) {
         self.theme = theme
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback)
-        try? session.setActive(true)
+        try? session.setCategory(.playback, options: [.mixWithOthers])
         loadSounds(theme)
+    }
+    
+    func activateSession() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: [
+            .allowAirPlay, .allowBluetoothA2DP, .allowBluetoothHFP
+        ])
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+    
+    func deactivateSession() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
     
     func loadSounds(_ theme: SoundTheme) {
@@ -46,6 +57,15 @@ final class AudioController: SignalPlayer {
         }
         player.currentTime = 0
         player.play()
+    }
+    
+    func playRecall(times: Int = 3, gap: TimeInterval = 0.35) {
+        Task { @MainActor in
+            for _ in 0..<times {
+                play(.go)
+                try? await Task.sleep(for: .seconds(gap))
+            }
+        }
     }
     
     func duration(of signal: Signal) -> TimeInterval {
