@@ -38,7 +38,7 @@ class StarterViewModel {
         configStore.save(config)
         player.activateSession()
         task = Task {
-            await engine.start(type: config.startType, config: config)
+            await engine.start(config: config)
             engine.reset()
             player.deactivateSession()
         }

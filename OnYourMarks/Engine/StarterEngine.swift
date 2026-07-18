@@ -15,13 +15,13 @@ struct Phase: Equatable {
 }
 
 
-@Observable
+@Observable @MainActor
 final class StarterEngine {
     private(set) var state: StarterState = .idle
     private let player: SignalPlayer
     private let movementDetector: MovementDetector
     private(set) var lastReactionTime: TimeInterval?
-    
+    private var sequenceTask: Task<Void, Never>?
     private var shotTime: TimeInterval? = nil
 
     init(player: SignalPlayer, movementDetector: MovementDetector) {
@@ -52,40 +52,26 @@ final class StarterEngine {
         }
     }
     
-    private func triggerFalseStart() {
+    func start(config: StartConfig) async {
+        shotTime = nil
+        sequenceTask?.cancel()
+        sequenceTask = Task { await runSequence(config: config) }
+    }
+    
+    func reset() {
         state = .idle
+        movementDetector.stopMonitoring()
+    }
+    
+    private func triggerFalseStart() {
+        sequenceTask?.cancel()
+        state = .falseStart
         movementDetector.stopMonitoring()
         player.playRecall(times: 3, gap: 0.35)
     }
     
-    func buildSequence(for type: StartType, config: StartConfig) -> [Phase] {
-        switch type {
-        case .block:
-            return [
-                Phase(state: .preparing, duration: config.blockTimeToReady, signal: nil),
-                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
-                Phase(state: .waitForSet, duration: config.blockTimeToSet, signal: nil),
-                Phase(state: .set, duration: nil, signal: Signal.set),
-                Phase(state: .waitForStart, duration: randomTimeToStart(config.blockTimeToStartMin, config.blockTimeToStartMax), signal: nil),
-                Phase(state: .start, duration: nil, signal: Signal.go),
-            ]
-        case .standing:
-            return [
-                Phase(state: .preparing, duration: config.standingTimeToReady, signal: nil),
-                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
-                Phase(state: .waitForStart, duration: randomTimeToStart(config.standingTimeToStartMin, config.standingTimeToStartMax), signal: nil),
-                Phase(state: .start, duration: nil, signal: Signal.go),
-            ]
-        }
-    }
-
-    private func randomTimeToStart(_ a: Double, _ b: Double) -> TimeInterval {
-        return Double.random(in: min(a, b)...max(a, b))
-    }
-
-    func start(type: StartType, config: StartConfig) async {
-        shotTime = nil
-        let phases = buildSequence(for: config.startType, config: config)
+    func runSequence(config: StartConfig) async {
+        let phases = buildSequence(config: config)
 
         for phase in phases {
             if Task.isCancelled { break }
@@ -108,8 +94,28 @@ final class StarterEngine {
         movementDetector.stopMonitoring()
     }
     
-    func reset() {
-        state = .idle
-        movementDetector.stopMonitoring()
+    func buildSequence(config: StartConfig) -> [Phase] {
+        switch config.startType {
+        case .block:
+            return [
+                Phase(state: .preparing, duration: config.blockTimeToReady, signal: nil),
+                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
+                Phase(state: .waitForSet, duration: config.blockTimeToSet, signal: nil),
+                Phase(state: .set, duration: nil, signal: Signal.set),
+                Phase(state: .waitForStart, duration: randomTimeToStart(config.blockTimeToStartMin, config.blockTimeToStartMax), signal: nil),
+                Phase(state: .start, duration: nil, signal: Signal.go),
+            ]
+        case .standing:
+            return [
+                Phase(state: .preparing, duration: config.standingTimeToReady, signal: nil),
+                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
+                Phase(state: .waitForStart, duration: randomTimeToStart(config.standingTimeToStartMin, config.standingTimeToStartMax), signal: nil),
+                Phase(state: .start, duration: nil, signal: Signal.go),
+            ]
+        }
+    }
+
+    private func randomTimeToStart(_ a: Double, _ b: Double) -> TimeInterval {
+        return Double.random(in: min(a, b)...max(a, b))
     }
 }
