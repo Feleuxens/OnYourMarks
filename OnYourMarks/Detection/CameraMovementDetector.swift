@@ -14,6 +14,7 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
     
     var onMovement: ((TimeInterval) -> Void)?
+    private var isConfigured = false
 
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -38,11 +39,11 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     private let minConfidence: Float = 0.3
     private let baselineFrameCount = 8
     private let movementThreshold: CGFloat = 0.05
-
-    override init() {
-        super.init()
+    
+    func configureIfNeeded() {
+        guard !isMonitoring else { return }
+        isConfigured = true
         configureSession()
-        print("Detector init, inputs: \(session.inputs.count), outputs: \(session.outputs.count)")
     }
 
     private func configureSession() {

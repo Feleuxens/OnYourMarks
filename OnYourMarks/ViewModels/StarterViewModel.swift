@@ -22,6 +22,7 @@ class StarterViewModel {
     var lastResult: ReactionResult?
     var falseStartActive = false
     var cameraEnabled = false
+    var cameraPermissionDenied: Bool = false
     
     var isRunning: Bool {
         engine.state != .idle
@@ -59,9 +60,13 @@ class StarterViewModel {
 
     func enableCamera() {
         Task {
-            guard await CameraPermission.request() else { return }
-            cameraEnabled = true
+            guard await CameraPermission.request() else {
+                cameraPermissionDenied = true
+                return
+            }
+            cameraDetector.configureIfNeeded()
             cameraDetector.startSession()
+            cameraEnabled = true
         }
     }
     

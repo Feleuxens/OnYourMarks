@@ -76,6 +76,14 @@ struct StarterView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
+        .alert("Camera access required", isPresented: $vm.cameraPermissionDenied) {
+            Button("Open Settings") {
+                UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable camera access in Settings to use false-start detection.")
+        }
     }
     
     private func resetWithAnimation() {
