@@ -35,6 +35,8 @@ class StarterViewModel {
     }
     
     func start() {
+        guard !isRunning else { return }  // prevent overlapping starts
+        
         configStore.save(config)
         player.activateSession()
         task = Task {
