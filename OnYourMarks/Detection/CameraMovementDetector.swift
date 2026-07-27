@@ -20,7 +20,8 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     private var device: AVCaptureDevice?
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
-    private let queue = DispatchQueue(label: "camera.movement.detector")
+    private let frameQueue = DispatchQueue(label: "camera.frame")
+    private let sessionQueue = DispatchQueue(label: "camera.session")
     private let poseRequest = VNDetectHumanBodyPoseRequest()
 
     private var isMonitoring = false
@@ -57,7 +58,7 @@ final class CameraMovementDetector: NSObject, MovementDetector {
             session.addInput(input)
             self.device = device
         }
-        videoOutput.setSampleBufferDelegate(self, queue: queue)
+        videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
@@ -66,21 +67,21 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     }
 
     func startSession() {
-        queue.async { [weak self] in
+        sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
             self.session.startRunning()
             print("Session läuft: \(self.session.isRunning)")
         }
     }
     func stopSession() {
-        queue.async { [weak self] in
+        sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
         }
     }
 
     func startMonitoring() {
-        queue.async { [weak self] in
+        frameQueue.async { [weak self] in
             guard let self, let device = self.device else { return }
             self.setFrameRate(60, on: device)
             self.baseline = nil
@@ -90,7 +91,7 @@ final class CameraMovementDetector: NSObject, MovementDetector {
         }
     }
     func stopMonitoring() {
-        queue.async { [weak self] in
+        frameQueue.async { [weak self] in
             guard let self, let device = self.device, !self.session.isRunning else { return }
             self.setFrameRate(15, on: device)
             self.isMonitoring = false
