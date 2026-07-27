@@ -12,10 +12,12 @@ import QuartzCore
 @Observable
 final class CameraMovementDetector: NSObject, MovementDetector {
     var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
-    
+    @MainActor var onJoints: (([VNHumanBodyPoseObservation.JointName: CGPoint]) -> Void)?
+
     var onMovement: ((TimeInterval) -> Void)?
     private var isConfigured = false
 
+    private var device: AVCaptureDevice?
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera.movement.detector")
@@ -48,11 +50,12 @@ final class CameraMovementDetector: NSObject, MovementDetector {
 
     private func configureSession() {
         session.beginConfiguration()
-        session.sessionPreset = .high
+        session.sessionPreset = .hd1920x1080
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
            let input = try? AVCaptureDeviceInput(device: device),
            session.canAddInput(input) {
             session.addInput(input)
+            self.device = device
         }
         videoOutput.setSampleBufferDelegate(self, queue: queue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -78,14 +81,34 @@ final class CameraMovementDetector: NSObject, MovementDetector {
 
     func startMonitoring() {
         queue.async { [weak self] in
-            self?.baseline = nil
-            self?.baselineFrames = 0
-            self?.hasTriggered = false
-            self?.isMonitoring = true
+            guard let self, let device = self.device else { return }
+            self.setFrameRate(60, on: device)
+            self.baseline = nil
+            self.baselineFrames = 0
+            self.hasTriggered = false
+            self.isMonitoring = true
         }
     }
     func stopMonitoring() {
-        queue.async { [weak self] in self?.isMonitoring = false }
+        queue.async { [weak self] in
+            guard let self, let device = self.device, !self.session.isRunning else { return }
+            self.setFrameRate(15, on: device)
+            self.isMonitoring = false
+        }
+    }
+    
+    private func setFrameRate(_ fps: Double, on device: AVCaptureDevice) {
+        guard let range = device.activeFormat.videoSupportedFrameRateRanges.first else { return }
+        let clamped = min(max(fps, range.minFrameRate), range.maxFrameRate)
+        do {
+            try device.lockForConfiguration()
+            let duration = CMTime(value: 1, timescale: CMTimeScale(clamped))
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
+            device.unlockForConfiguration()
+        } catch {
+            //logger.error("Frame-rate config failed: \(error)")
+        }
     }
 }
 
@@ -113,7 +136,7 @@ extension CameraMovementDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let snapshot = current
         DispatchQueue.main.async { [weak self] in
-            self?.detectedJoints = snapshot
+            self?.onJoints?(snapshot)
         }
         
         guard isMonitoring, !hasTriggered, !current.isEmpty else {

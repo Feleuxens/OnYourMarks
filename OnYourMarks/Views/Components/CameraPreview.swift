@@ -10,19 +10,31 @@ import AVFoundation
 import Vision
 
 struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
-    let joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+    let detector: CameraMovementDetector
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator(detector: detector)
+    }
+    
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
-        v.videoPreviewLayer.session = session
+        v.videoPreviewLayer.session = detector.session
         v.videoPreviewLayer.videoGravity = .resizeAspectFill
+        detector.onJoints = { [weak v] joints in v?.joints = joints }
         return v
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        uiView.joints = joints
-        uiView.setNeedsLayout()
+        //uiView.setNeedsLayout()
+    }
+    
+    static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
+        coordinator.detector.onJoints = nil
+    }
+    
+    final class Coordinator {
+        let detector: CameraMovementDetector
+        init(detector: CameraMovementDetector) { self.detector = detector }
     }
 
     final class PreviewView: UIView {
@@ -83,7 +95,11 @@ struct CameraPreview: UIViewRepresentable {
                 }
             }
 
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            overlayLayer.frame = bounds
             overlayLayer.path = path.cgPath
+            CATransaction.commit()
         }
     }
 }
