@@ -6,33 +6,41 @@
 //
 
 struct StartConfig: Codable {
-    var sliderReadyClamp: Double = 20
+    static let readyRange: ClosedRange<Double> = 0...20
+    static let setRange: ClosedRange<Double> = 0...30
+    static let startRange: ClosedRange<Double> = 0...10
+    
     var blockTimeToReady: Double = 2 {
-        didSet { blockTimeToReady = blockTimeToReady.clamped(to: 0...sliderReadyClamp) }
+        didSet { blockTimeToReady = blockTimeToReady.clamped(to: Self.readyRange) }
     }
     var standingTimeToReady: Double = 2 {
-        didSet { standingTimeToReady = standingTimeToReady.clamped(to: 0...sliderReadyClamp) }
+        didSet { standingTimeToReady = standingTimeToReady.clamped(to: Self.readyRange) }
     }
     
-    var sliderSetClamp: Double = 30
     var blockTimeToSet: Double = 12 {
-        didSet { blockTimeToSet = blockTimeToSet.clamped(to: 0...sliderSetClamp) }
+        didSet { blockTimeToSet = blockTimeToSet.clamped(to: Self.setRange) }
     }
     
-    var sliderStartMinClamp: Double = 10
     var blockTimeToStartMin: Double = 1 {
-        didSet { blockTimeToStartMin = blockTimeToStartMin.clamped(to: 0...sliderStartMinClamp) }
+        didSet {
+            blockTimeToStartMin = blockTimeToStartMin.clamped(to: Self.startRange)
+        }
     }
     var standingTimeToStartMin: Double = 1 {
-        didSet { standingTimeToStartMin = standingTimeToStartMin.clamped(to: 0...sliderStartMinClamp) }
+        didSet {
+            standingTimeToStartMin = standingTimeToStartMin.clamped(to: Self.startRange)
+        }
     }
     
-    var sliderStartMaxClamp: Double = 10
     var blockTimeToStartMax: Double = 2 {
-        didSet { blockTimeToStartMax = blockTimeToStartMax.clamped(to: 0...sliderStartMaxClamp) }
+        didSet {
+            blockTimeToStartMax = blockTimeToStartMax.clamped(to: Self.startRange)
+        }
     }
     var standingTimeToStartMax: Double = 2 {
-        didSet { standingTimeToStartMax = standingTimeToStartMax.clamped(to: 0...sliderStartMaxClamp) }
+        didSet {
+            standingTimeToStartMax = standingTimeToStartMax.clamped(to: Self.startRange)
+        }
     }
     
     var startType: StartType = StartType.block
@@ -43,24 +51,52 @@ struct StartConfig: Codable {
     
     init() {}
     
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let d = StartConfig.standard   // Defaults as fallback
-
-        startType = try c.decodeIfPresent(StartType.self, forKey: .startType) ?? d.startType
-        
-        blockTimeToReady = try c.decodeIfPresent(Double.self, forKey: .blockTimeToReady) ?? d.blockTimeToReady
-        blockTimeToSet = try c.decodeIfPresent(Double.self, forKey: .blockTimeToSet) ?? d.blockTimeToSet
-        blockTimeToStartMin = try c.decodeIfPresent(Double.self, forKey: .blockTimeToStartMin) ?? d.blockTimeToStartMin
-        blockTimeToStartMax = try c.decodeIfPresent(Double.self, forKey: .blockTimeToStartMax) ?? d.blockTimeToStartMax
-        
-        standingTimeToReady = try c.decodeIfPresent(Double.self, forKey: .standingTimeToReady) ?? d.standingTimeToReady
-        standingTimeToStartMin = try c.decodeIfPresent(Double.self, forKey: .standingTimeToStartMin) ?? d.standingTimeToStartMin
-        standingTimeToStartMax = try c.decodeIfPresent(Double.self, forKey: .standingTimeToStartMax) ?? d.standingTimeToStartMax
-        
-        soundTheme = try c.decodeIfPresent(SoundTheme.self, forKey: .soundTheme) ?? d.soundTheme
+    private enum CodingKeys: String, CodingKey {
+        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme
     }
     
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = StartConfig.standard   // Defaults as fallback
+
+        startType = try container.decodeIfPresent(StartType.self, forKey: .startType) ?? defaults.startType
+        
+        blockTimeToReady = try container.decodeIfPresent(Double.self, forKey: .blockTimeToReady) ?? defaults.blockTimeToReady
+        blockTimeToSet = try container.decodeIfPresent(Double.self, forKey: .blockTimeToSet) ?? defaults.blockTimeToSet
+        blockTimeToStartMin = try container.decodeIfPresent(Double.self, forKey: .blockTimeToStartMin) ?? defaults.blockTimeToStartMin
+        blockTimeToStartMax = try container.decodeIfPresent(Double.self, forKey: .blockTimeToStartMax) ?? defaults.blockTimeToStartMax
+        
+        standingTimeToReady = try container.decodeIfPresent(Double.self, forKey: .standingTimeToReady) ?? defaults.standingTimeToReady
+        standingTimeToStartMin = try container.decodeIfPresent(Double.self, forKey: .standingTimeToStartMin) ?? defaults.standingTimeToStartMin
+        standingTimeToStartMax = try container.decodeIfPresent(Double.self, forKey: .standingTimeToStartMax) ?? defaults.standingTimeToStartMax
+        
+        soundTheme = try container.decodeIfPresent(SoundTheme.self, forKey: .soundTheme) ?? defaults.soundTheme
+        
+        normalize()
+    }
+    
+    private mutating func normalize() {
+        blockTimeToReady =
+            blockTimeToReady.clamped(to: Self.readyRange)
+
+        standingTimeToReady =
+            standingTimeToReady.clamped(to: Self.readyRange)
+
+        blockTimeToSet =
+            blockTimeToSet.clamped(to: Self.setRange)
+
+        blockTimeToStartMin =
+            blockTimeToStartMin.clamped(to: Self.startRange)
+
+        blockTimeToStartMax =
+            blockTimeToStartMax.clamped(to: Self.startRange)
+
+        standingTimeToStartMin =
+            standingTimeToStartMin.clamped(to: Self.startRange)
+
+        standingTimeToStartMax =
+            standingTimeToStartMax.clamped(to: Self.startRange)
+    }
 }
 extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
