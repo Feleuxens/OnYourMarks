@@ -8,10 +8,14 @@
 import AVFoundation
 import Vision
 import QuartzCore
+import OSLog
 
 @Observable
 final class CameraMovementDetector: NSObject, MovementDetector {
-    var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks", category: "Camera"
+    )
+    
     @MainActor var onJoints: (([VNHumanBodyPoseObservation.JointName: CGPoint]) -> Void)?
 
     var onMovement: ((TimeInterval) -> Void)?
@@ -24,14 +28,14 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     private let sessionQueue = DispatchQueue(label: "camera.session")
     private let poseRequest = VNDetectHumanBodyPoseRequest()
 
-    private var isMonitoring = false
+    private(set) var isMonitoring = false
     private var baseline: [VNHumanBodyPoseObservation.JointName: CGPoint]?
     private var baselineFrames = 0
     private var hasTriggered = false
 
     private let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] =
         [
-            .root,
+            .root, .neck,
             .leftHip, .rightHip,
             .leftWrist, .rightWrist,
             .leftElbow, .rightElbow,
@@ -43,47 +47,72 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     private let baselineFrameCount = 8
     private let movementThreshold: CGFloat = 0.05
     
-    func configureIfNeeded() {
-        guard !isMonitoring else { return }
-        isConfigured = true
-        configureSession()
-    }
-
-    private func configureSession() {
+    func configureIfNeeded() -> Bool {
+        if isConfigured { return true }
+        
         session.beginConfiguration()
-        session.sessionPreset = .hd1920x1080
-        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-           let input = try? AVCaptureDeviceInput(device: device),
-           session.canAddInput(input) {
-            session.addInput(input)
-            self.device = device
+        defer {
+            session.commitConfiguration()
         }
+        
+        if session.canSetSessionPreset(.hd1920x1080) {
+            session.sessionPreset = .hd1920x1080
+        }
+        
+        guard let camera = AVCaptureDevice.default(
+            .builtInWideAngleCamera, for: .video, position: .back
+        ) else {
+            logger.error("No back camera available")
+            return false
+        }
+        
+        
+        guard let input = try? AVCaptureDeviceInput(device: camera), session.canAddInput(input) else {
+            return false
+        }
+        
+        session.addInput(input)
+        
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
-        if session.canAddOutput(videoOutput) {
-            session.addOutput(videoOutput)
+        
+        guard session.canAddOutput(videoOutput) else {
+            session.removeInput(input)
+            return false
         }
-        session.commitConfiguration()
+                
+        session.addOutput(videoOutput)
+        
+        device = camera
+        isConfigured = true
+        return true
     }
 
     func startSession() {
         sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
             self.session.startRunning()
-            print("Session läuft: \(self.session.isRunning)")
         }
     }
+
     func stopSession() {
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
         }
     }
-
+    
     func startMonitoring() {
+        print(
+            "Active camera format max FPS:",
+            activeFormatMaximumFrameRate() ?? 0
+        )
         frameQueue.async { [weak self] in
-            guard let self, let device = self.device else { return }
+            guard let self else { return }
+            guard let device = self.device else { return }
+            
             self.setFrameRate(60, on: device)
+            
             self.baseline = nil
             self.baselineFrames = 0
             self.hasTriggered = false
@@ -92,24 +121,79 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     }
     func stopMonitoring() {
         frameQueue.async { [weak self] in
-            guard let self, let device = self.device, !self.session.isRunning else { return }
-            self.setFrameRate(15, on: device)
+            guard let self else { return }
+            
+            // reset variables even if no device exists
             self.isMonitoring = false
+            self.baseline = nil
+            self.baselineFrames = 0
+            self.hasTriggered = false
+            
+            guard let device = self.device else { return }
+            
+            self.setFrameRate(15, on: device)
         }
     }
     
-    private func setFrameRate(_ fps: Double, on device: AVCaptureDevice) {
-        guard let range = device.activeFormat.videoSupportedFrameRateRanges.first else { return }
-        let clamped = min(max(fps, range.minFrameRate), range.maxFrameRate)
+    private func setFrameRate(_ requestedFps: Double, on device: AVCaptureDevice) {
+        guard requestedFps > 0 else { return }
+        
+        guard let fps = nearestSupportedFrameRate(to: requestedFps, on: device) else { return }
+        
+        let frameDuration = CMTime(seconds: 1.0 / fps, preferredTimescale: 60_000)
+
         do {
             try device.lockForConfiguration()
-            let duration = CMTime(value: 1, timescale: CMTimeScale(clamped))
-            device.activeVideoMinFrameDuration = duration
-            device.activeVideoMaxFrameDuration = duration
+            
+            device.activeVideoMinFrameDuration = frameDuration
+            device.activeVideoMaxFrameDuration = frameDuration
+            
             device.unlockForConfiguration()
         } catch {
-            //logger.error("Frame-rate config failed: \(error)")
+            logger.error("Frame-rate config failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+    
+    private func nearestSupportedFrameRate(to requestedFps: Double, on device: AVCaptureDevice) -> Double? {
+        let ranges = device.activeFormat.videoSupportedFrameRateRanges
+        
+        guard !ranges.isEmpty else { return nil }
+        
+        // Return exact fps is supported
+        if ranges.contains(where: {
+            requestedFps >= $0.minFrameRate && requestedFps <= $0.maxFrameRate
+        }) {
+            return requestedFps
+        }
+        
+        // otherwise choose closest supported boundary
+        let supportedBoundaries = ranges.flatMap {
+            [$0.minFrameRate, $0.maxFrameRate]
+        }
+        
+        return supportedBoundaries.min {
+            abs($0 - requestedFps) < abs($1 - requestedFps)
+        }
+    }
+    
+    func activeFormatSupportedFrameRateRanges()
+        -> [ClosedRange<Double>]
+    {
+        guard let device else {
+            return []
+        }
+
+        return device.activeFormat
+            .videoSupportedFrameRateRanges
+            .map {
+                $0.minFrameRate...$0.maxFrameRate
+            }
+    }
+
+    func activeFormatMaximumFrameRate() -> Double? {
+        activeFormatSupportedFrameRateRanges()
+            .map(\.upperBound)
+            .max()
     }
 }
 
