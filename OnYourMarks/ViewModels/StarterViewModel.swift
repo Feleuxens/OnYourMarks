@@ -10,48 +10,69 @@ import Foundation
 import QuartzCore
 
 @Observable
+@MainActor
 class StarterViewModel {
-    var config: StartConfig
-    private let configStore = ConfigStore()
-    let engine: StarterEngine
-    private let player: AudioController
-    private var task: Task<Void, Never>?
+    var config: StartConfig {
+        didSet {
+            configStore.save(config)
+            player.theme = config.soundTheme
+        }
+    }
     
-    let cameraDetector = CameraMovementDetector()
-    var shotTime: TimeInterval?
-    var lastResult: ReactionResult?
-    var falseStartActive = false
+    private let configStore: ConfigStore
+    private let player: AudioController
+    
+    let cameraDetector: CameraMovementDetector
+    let engine: StarterEngine
+    
+    private var cameraEnableTask: Task<Void, Never>?
+    
     var cameraEnabled = false
-    var cameraPermissionDenied: Bool = false
+    var cameraPermissionDenied = false
+    var errorMessage: String?
     
     var isRunning: Bool {
         engine.state != .idle
     }
     
-    init() {
-        self.config = ConfigStore().load()
-        let player = AudioController()
+    init(configStore: ConfigStore? = nil, cameraDetector: CameraMovementDetector? = nil) {
+        let configStore = configStore ?? ConfigStore()
+        let cameraDetector = cameraDetector ?? CameraMovementDetector()
+        self.configStore = configStore
+        let config = configStore.load()
+        self.config = config
+        
+        let player = AudioController(theme: config.soundTheme)
         self.player = player
+        
+        self.cameraDetector = cameraDetector
         self.engine = StarterEngine(player: player, movementDetector: cameraDetector)
+        
+        engine.onRunEnded = { [weak self] in
+            self?.player.deactivateSession()
+        }
+        
+        engine.onError = { [weak self] message in
+            self?.errorMessage = message
+        }
+
     }
     
     func start() {
-        guard !isRunning else { return }  // prevent overlapping starts
+        guard !isRunning else { return }
         
-        configStore.save(config)
-        player.activateSession()
-        task = Task {
-            await engine.start(config: config)
-            engine.reset()
-            player.deactivateSession()
+        do {
+            try player.activateSession()
+        } catch {
+            errorMessage = "The audio session could not be startet: \(error.localizedDescription)"
+            return
         }
+        
+        engine.start(config: config)
     }
     
     func abort() {
-        task?.cancel()
-        task = nil
-        engine.reset()
-        player.deactivateSession()
+        engine.abort()
     }
     
     func resetConfig() {
@@ -59,18 +80,29 @@ class StarterViewModel {
     }
 
     func enableCamera() {
+        guard !isRunning else { return }
+        
         Task {
             guard await CameraPermission.request() else {
                 cameraPermissionDenied = true
                 return
             }
-            cameraDetector.configureIfNeeded()
+            cameraPermissionDenied = false
+            guard cameraDetector.configureIfNeeded() else {
+                errorMessage = "The camera could not be configured."
+                return
+            }
             cameraDetector.startSession()
             cameraEnabled = true
         }
     }
     
     func disableCamera() {
+        guard !isRunning else { return }
+        
+        cameraEnableTask?.cancel()
+        cameraEnableTask = nil
+        
         cameraEnabled = false
         cameraDetector.stopMonitoring()
         cameraDetector.stopSession()

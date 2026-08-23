@@ -18,18 +18,93 @@ struct Phase: Equatable {
 @Observable @MainActor
 final class StarterEngine {
     private(set) var state: StarterState = .idle
+    private(set) var isRunning: Bool = false
+    
+    private(set) var lastReactionTime: TimeInterval?
     private let player: SignalPlayer
     private let movementDetector: MovementDetector
-    private(set) var lastReactionTime: TimeInterval?
+    
     private var sequenceTask: Task<Void, Never>?
     private var shotTime: TimeInterval? = nil
+    
+    var onRunEnded: (() -> Void)?
+    var onError: ((String) -> Void)?
+    
+    private enum SequenceOutcome {
+        case completed
+        case cancelled
+        case failed(String)
+    }
 
     init(player: SignalPlayer, movementDetector: MovementDetector) {
         self.player = player
         self.movementDetector = movementDetector
+        
         self.movementDetector.onMovement = { [weak self] moveTime in
                 self?.handleMovement(at: moveTime)
             }
+    }
+    
+    func start(config: StartConfig) {
+        guard !isRunning else { return }
+        
+        player.stop()
+                
+        shotTime = nil
+        lastReactionTime = nil
+        isRunning = true
+        
+        sequenceTask = Task { [weak self] in
+            guard let self else { return }
+            
+            let outcome = await runSequence(config: config)
+            
+            // abort() or triggerFalseStart() runs own cleanup after cancellation
+            guard !Task.isCancelled else { return }
+            
+            switch outcome {
+            case .completed:
+                self.finishRun()
+                
+            case .failed(let message):
+                self.onError?(message)
+                self.finishRun()
+            
+            case .cancelled:
+                break
+            }
+        }
+    }
+    
+    func abort() {
+        guard isRunning else { return }
+        
+        sequenceTask?.cancel()
+        sequenceTask = nil
+        
+        player.stop()
+        movementDetector.stopMonitoring()
+        
+        shotTime = nil
+        state = .idle
+        isRunning = false
+        
+        onRunEnded?()
+    }
+    
+    private func finishRun() {
+        guard isRunning else { return }
+        
+        sequenceTask = nil
+        
+        player.stop()
+        movementDetector.stopMonitoring()
+        
+        shotTime = nil
+        state = .idle
+        isRunning = false
+        
+        onRunEnded?()
     }
     
     private func handleMovement(at moveTime: TimeInterval) {
@@ -37,13 +112,12 @@ final class StarterEngine {
 
         switch shotTime {
         case nil:
-            print("False start")
             triggerFalseStart()
 
         case let shot?:
             let reaction = moveTime - shot
+            
             if reaction < 0.100 {
-                print("Reaction time \(reaction)")
                 triggerFalseStart()
             } else {
                 lastReactionTime = reaction
@@ -52,46 +126,63 @@ final class StarterEngine {
         }
     }
     
-    func start(config: StartConfig) async {
-        shotTime = nil
-        sequenceTask?.cancel()
-        sequenceTask = Task { await runSequence(config: config) }
-    }
     
-    func reset() {
-        state = .idle
-        movementDetector.stopMonitoring()
-    }
     
     private func triggerFalseStart() {
+        guard isRunning, state != .falseStart else { return }
+        
         sequenceTask?.cancel()
-        state = .falseStart
+        
+        player.stop()
         movementDetector.stopMonitoring()
-        player.playRecall(times: 3, gap: 0.35)
+        
+        state = .falseStart
+        
+        sequenceTask = Task { [weak self] in
+            guard let self else { return }
+            
+            await self.player.playRecall(times: 3, gap: 0.35)
+            
+            guard !Task.isCancelled else { return }
+            
+            self.finishRun()
+        }
     }
     
-    func runSequence(config: StartConfig) async {
+    private func runSequence(config: StartConfig) async -> SequenceOutcome {
         let phases = buildSequence(config: config)
 
         for phase in phases {
-            if Task.isCancelled { break }
+            guard !Task.isCancelled else {
+                return .cancelled
+            }
 
             state = phase.state
 
-            if state == .waitForStart { movementDetector.startMonitoring() }
-            if state == .start { shotTime = CACurrentMediaTime() }
-
-            if let duration = phase.duration {
+            if state == .waitForStart {
+                movementDetector.startMonitoring()
+            }
+            // this currently ignores audio schedule latency
+            if state == .start {
+                shotTime = CACurrentMediaTime()
+            }
+            
+            if let signal = phase.signal {
+                guard player.play(signal) else {
+                    return .failed("Could not play \(signal)")
+                }
+                
+                do {
+                    try await Task.sleep(for: .seconds(player.duration(of: signal)))
+                } catch {
+                    return .cancelled
+                }
+            } else if let duration = phase.duration {
                 do { try await Task.sleep(for: .seconds(duration)) }
-                catch { break }
-            } else if let signal = phase.signal {
-                player.play(signal)
-                try? await Task.sleep(for: .seconds(player.duration(of: signal)))
+                catch { return .cancelled }
             }
         }
-
-        state = .idle
-        movementDetector.stopMonitoring()
+        return .completed
     }
     
     func buildSequence(config: StartConfig) -> [Phase] {
