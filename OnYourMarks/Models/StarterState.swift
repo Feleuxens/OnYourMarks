@@ -14,6 +14,5 @@ enum StarterState: Equatable {
     case waitForStart
     case start
     case falseStart
-    case finished
 }
 

@@ -8,13 +8,16 @@
 import SwiftUI
 
 struct StarterView: View {
-    @Bindable var vm = StarterViewModel()
+    @State private var vm = StarterViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     
     private var shouldStayAwake: Bool {
         vm.cameraEnabled || vm.isRunning
     }
     
     var body: some View {
+        @Bindable var vm = vm
+        
         NavigationStack {
             
             ZStack {
@@ -39,6 +42,8 @@ struct StarterView: View {
                             if vm.cameraEnabled { vm.disableCamera() }
                             else { vm.enableCamera() }
                         }
+                        .disabled(vm.isRunning)
+                        .opacity(vm.isRunning ? 0.5 : 1)
                         .padding(.bottom, 8)
                     }
                     
@@ -83,6 +88,36 @@ struct StarterView: View {
         } message: {
             Text("Enable camera access in Settings to use false-start detection.")
         }
+        .alert(
+            "OnYourMarks Error",
+            isPresented: Binding(
+                get: {
+                    vm.errorMessage != nil
+                },
+                set: {
+                    presented in if !presented {
+                        vm.errorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("Ok") {
+                vm.errorMessage = nil
+            }
+        } message: {
+            Text(vm.errorMessage ?? "")
+        }
+        .onChange(of: scenePhase) { _, newPase in
+            guard newPase == .active else { return }
+            
+            if vm.isRunning {
+                vm.abort()
+            }
+            if vm.cameraEnabled {
+                vm.disableCamera()
+            }
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
     }
     
     private func resetWithAnimation() {
@@ -93,6 +128,5 @@ struct StarterView: View {
 }
 
 #Preview {
-    @Previewable @State var config = StarterViewModel()
     StarterView()
 }

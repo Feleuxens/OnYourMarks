@@ -11,9 +11,7 @@ import SwiftUI
 struct OnYourMarksApp: App {
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                StarterView()
-            }
+            StarterView()
         }
     }
 }
