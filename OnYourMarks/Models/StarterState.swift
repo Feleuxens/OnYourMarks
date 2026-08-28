@@ -5,7 +5,7 @@
 //  Created by Felix on 12.06.26.
 //
 
-enum StarterState: Equatable {
+nonisolated enum StarterState: Equatable, Sendable {
     case idle
     case preparing // before the on your marks command
     case onYourMarks

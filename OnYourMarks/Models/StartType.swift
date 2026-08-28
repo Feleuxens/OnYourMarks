@@ -5,7 +5,7 @@
 //  Created by Felix on 11.06.26.
 //
 
-enum StartType: Codable {
+nonisolated enum StartType: Codable, Equatable, Sendable {
     case block
     case standing
 }
