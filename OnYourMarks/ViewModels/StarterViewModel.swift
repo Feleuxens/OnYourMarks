@@ -25,6 +25,13 @@ class StarterViewModel {
     let cameraDetector: CameraMovementDetector
     let engine: StarterEngine
     
+    var currentSession: StartSession? {
+        engine.currentSession
+    }
+    var lastSession: StartSession? {
+        engine.lastSession
+    }
+    
     private var cameraEnableTask: Task<Void, Never>?
     
     var cameraEnabled = false
