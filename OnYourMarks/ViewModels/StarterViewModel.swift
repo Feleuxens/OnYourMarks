@@ -20,7 +20,7 @@ class StarterViewModel {
     }
     
     private let configStore: ConfigStore
-    private let player: AudioController
+    private let player: AudioSessionPlayer
     
     let cameraDetector: CameraMovementDetector
     let engine: StarterEngine
@@ -35,7 +35,7 @@ class StarterViewModel {
     private var cameraEnableTask: Task<Void, Never>?
     /// Audio of other apps resume after the session is desctivated.
     /// After a start that happens after a delay to let the runner start without distraction.
-    private static let musicResumeDelay: Duration = .seconds(2)
+    private let musicResumeDelay: Duration
     private var sessionDeactivationTask: Task<Void, Never>?
     /// Set from the Start tap until the sequence runs (or the start was
     /// given up). While set, no other start can begin.
@@ -53,15 +53,21 @@ class StarterViewModel {
         isStarting || engine.state != .idle
     }
     
-    init(configStore: ConfigStore? = nil, cameraDetector: CameraMovementDetector? = nil) {
+    init(
+        configStore: ConfigStore? = nil,
+        cameraDetector: CameraMovementDetector? = nil,
+        player: AudioSessionPlayer? = nil,
+        musicResumeDelay: Duration = .seconds(2)
+    ) {
         let configStore = configStore ?? ConfigStore()
         let cameraDetector = cameraDetector ?? CameraMovementDetector()
         self.configStore = configStore
         let config = configStore.load()
         self.config = config
         
-        let player = AudioController(theme: config.soundTheme)
+        let player = player ?? AudioController(theme: config.soundTheme)
         self.player = player
+        self.musicResumeDelay = musicResumeDelay
         
         self.cameraDetector = cameraDetector
         self.engine = StarterEngine(player: player, movementDetector: cameraDetector)
@@ -126,7 +132,7 @@ class StarterViewModel {
         
         switch engine.lastSession?.outcome {
         case .completed?, .falseStart?:
-            delay = Self.musicResumeDelay
+            delay = musicResumeDelay
         default:
             // on user abort or failue the audio can resume immediately
             delay = .zero

@@ -9,7 +9,7 @@ import AVFoundation
 import OSLog
 
 @MainActor
-final class AudioController: SignalPlayer {
+final class AudioController: AudioSessionPlayer {
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
         category: "Audio"
@@ -410,6 +410,19 @@ protocol SignalPlayer {
     func duration(of signal: Signal) -> TimeInterval
     
     func logTimingDiagnostics(label: String)
+}
+
+/// A signal player that also owns the audio session, as the view model needs it.
+@MainActor
+protocol AudioSessionPlayer: AnyObject, SignalPlayer {
+    var theme: SoundTheme { get set }
+    
+    /// Audio output can't be trusted anymore; argument shown to the user
+    var onUnexpectedStop: ((String) -> Void)? { get set }
+    
+    func activateSession() async throws
+    
+    func deactivateSession() async
 }
 
 nonisolated enum AudioSessionError: LocalizedError {
