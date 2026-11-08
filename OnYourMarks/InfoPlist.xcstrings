@@ -1,0 +1,24 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSCameraUsageDescription": {
+      "comment": "Camera permission prompt",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "OnYourMarks uses the camera to detect false starts."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OnYourMarks nutzt die Kamera, um Fehlstarts zu erkennen."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

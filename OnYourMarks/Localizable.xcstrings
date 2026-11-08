@@ -1,0 +1,236 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Abort": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
+          }
+        }
+      }
+    },
+    "Block": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Block"
+          }
+        }
+      }
+    },
+    "Camera access required": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kamerazugriff erforderlich"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
+          }
+        }
+      }
+    },
+    "Detection off": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkennung aus"
+          }
+        }
+      }
+    },
+    "Detection on": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkennung an"
+          }
+        }
+      }
+    },
+    "Enable camera access in Settings to use false-start detection.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube den Kamerazugriff in den Einstellungen, um Fehlstarts zu erkennen."
+          }
+        }
+      }
+    },
+    "Max time until Start": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Max. Zeit bis Start"
+          }
+        }
+      }
+    },
+    "Min time until Start": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Min. Zeit bis Start"
+          }
+        }
+      }
+    },
+    "Ok": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "OnYourMarks Error": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OnYourMarks-Fehler"
+          }
+        }
+      }
+    },
+    "Open Settings": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen öffnen"
+          }
+        }
+      }
+    },
+    "Reset to defaults": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auf Standard zurücksetzen"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen"
+          }
+        }
+      }
+    },
+    "Signal": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signal"
+          }
+        }
+      }
+    },
+    "Sound": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ton"
+          }
+        }
+      }
+    },
+    "Standing": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hochstart"
+          }
+        }
+      }
+    },
+    "Start": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start"
+          }
+        }
+      }
+    },
+    "Start sequence (block)": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startsequenz (Block)"
+          }
+        }
+      }
+    },
+    "Start sequence (standing)": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startsequenz (Hochstart)"
+          }
+        }
+      }
+    },
+    "Time until \"On Your Marks\"": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeit bis „On Your Marks“"
+          }
+        }
+      }
+    },
+    "Time until \"Set\"": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeit bis „Set“"
+          }
+        }
+      }
+    },
+    "s": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "s"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
