@@ -40,6 +40,8 @@ final class AudioController: AudioSessionPlayer {
     private var sessionTransition: Task<Void, Never>?
     
     private let timingDiagnostics = AudioTimingDiagnostics()
+    private let clockBridge = AudioHostClockBridge()
+    private let clock = SystemMonotonicClock()
     
     private var observerTokens: [NotificationCenter.ObservationToken] = []
         
@@ -47,7 +49,6 @@ final class AudioController: AudioSessionPlayer {
         self.theme = theme
         attachNodes()
         loadSounds(theme)
-        configureSessionCategory()
         observeSystemNotifications()
     }
     
@@ -57,9 +58,12 @@ final class AudioController: AudioSessionPlayer {
         }
     }
     
-    private func configureSessionCategory() {
+    /// Talks to the audio server, which can block while a session is active,
+    /// so it stays off the main actor.
+    @concurrent
+    private nonisolated static func configureCategory(of session: AVAudioSession, logger: Logger) async {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+            try session.setCategory(.playback, mode: .default, options: [])
         } catch {
             logger.error("Could not set audio session category: \(error.localizedDescription, privacy: .public)")
         }
@@ -105,6 +109,9 @@ final class AudioController: AudioSessionPlayer {
     
     private func performActivation() async throws {
         let session = AVAudioSession.sharedInstance()
+        
+        // Before every activation, so it also holds after a media services reset.
+        await Self.configureCategory(of: session, logger: logger)
         
         guard try await session.activate() else {
             throw AudioSessionError.activationRefused
@@ -242,6 +249,83 @@ final class AudioController: AudioSessionPlayer {
         return true
     }
     
+    /// Starts the signal on the audio clock at the given host time, or as soon
+    /// after it as can still be scheduled reliably.
+    ///
+    /// `stop()` cancels it while it is still pending.
+    func schedule(_ signal: Signal, at requested: MonotonicTimestamp) -> ScheduledSignal? {
+        guard let node = nodes[signal], let buffer = buffers[signal] else {
+            logger.error("No audio player loaded for \(String(describing: signal), privacy: .public)")
+            return nil
+        }
+        
+        guard engine.isRunning else {
+            logger.error("Audio engine not running, cannot schedule \(String(describing: signal), privacy: .public)")
+            return nil
+        }
+        
+        let lead = OutputTiming.minimumLead(ioBufferDuration: AVAudioSession.sharedInstance().ioBufferDuration)
+        let earliest = MonotonicTimestamp(seconds: clock.now().seconds + lead)
+        let renderStart = max(requested, earliest)
+        
+        node.stop()
+        node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+        
+        do {
+            try node.playAudio(at: clockBridge.audioTime(for: renderStart))
+        } catch {
+            logger.error("Could not schedule \(String(describing: signal), privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        
+        return scheduledSignal(signal, on: node, renderStart: renderStart)
+    }
+    
+    /// When the signal's playback actually started, read back from the
+    /// player's render timeline. Nil until its first sample has been rendered.
+    func measuredPlayback(of signal: Signal) -> ScheduledSignal? {
+        guard let node = nodes[signal],
+              let nodeTime = node.lastRenderTime,
+              nodeTime.isHostTimeValid,
+              let playerTime = node.playerTime(forNodeTime: nodeTime),
+              playerTime.sampleTime >= 0 else {
+            return nil
+        }
+        
+        // The player's sample time counts from its first rendered sample.
+        let renderedAt = AVAudioTime.seconds(forHostTime: nodeTime.hostTime)
+        let renderStart = renderedAt - Double(playerTime.sampleTime) / playerTime.sampleRate
+        
+        return scheduledSignal(signal, on: node, renderStart: MonotonicTimestamp(seconds: renderStart))
+    }
+    
+    private func scheduledSignal(
+        _ signal: Signal,
+        on node: AVAudioPlayerNode,
+        renderStart: MonotonicTimestamp
+    ) -> ScheduledSignal {
+        let session = AVAudioSession.sharedInstance()
+        
+        // Zero means unknown; the session's figure is the next best estimate.
+        let nodeLatency = node.outputPresentationLatency
+        let latency = nodeLatency > 0 ? nodeLatency : session.outputLatency
+        
+        let isWireless = session.currentRoute.outputs.contains {
+            OutputTiming.wirelessPorts.contains($0.portType)
+        }
+        
+        return ScheduledSignal(
+            signal: signal,
+            renderStart: renderStart,
+            audibleOnset: OutputTiming.audibleOnset(
+                renderStart: renderStart,
+                latency: latency,
+                onsetOffset: onsetOffsets[signal] ?? 0,
+                uncertainty: OutputTiming.uncertainty(latency: latency, isWireless: isWireless)
+            )
+        )
+    }
+    
     func stop() {
         for node in nodes.values {
             node.stop()
@@ -348,7 +432,6 @@ final class AudioController: AudioSessionPlayer {
         nodes.removeAll()
         attachNodes()
         loadSounds(theme)
-        configureSessionCategory()
         
         if wasActive {
             reportUnexpectedStop("The start was aborted because the audio system was reset.")
@@ -377,6 +460,10 @@ nonisolated enum Signal: CaseIterable, Sendable {
 protocol SignalPlayer {
     @discardableResult
     func play(_ signal: Signal) -> Bool
+    
+    func schedule(_ signal: Signal, at time: MonotonicTimestamp) -> ScheduledSignal?
+    
+    func measuredPlayback(of signal: Signal) -> ScheduledSignal?
     
     func stop()
     

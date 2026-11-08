@@ -18,6 +18,15 @@ class FakeSignalPlayer: SignalPlayer {
     
     var failingSignal: Signal?
     
+    /// Length of the gun; zero lets sequences run instantly.
+    var gunDuration: TimeInterval = 0
+    /// Added between render start and the audible onset.
+    var outputLatency: TimeInterval = 0
+    
+    /// The scheduled signal that stop() has not cancelled yet.
+    private(set) var pendingSchedule: ScheduledSignal?
+    private(set) var scheduleRequests: [MonotonicTimestamp] = []
+    
     func play(_ signal: Signal) -> Bool {
         if signal == failingSignal {
             return false
@@ -27,8 +36,29 @@ class FakeSignalPlayer: SignalPlayer {
         return true
     }
     
+    func schedule(_ signal: Signal, at time: MonotonicTimestamp) -> ScheduledSignal? {
+        scheduleRequests.append(time)
+        
+        guard signal != failingSignal else { return nil }
+        
+        played.append(signal)
+        
+        let scheduled = ScheduledSignal(
+            signal: signal,
+            renderStart: time,
+            audibleOnset: .exact(MonotonicTimestamp(seconds: time.seconds + outputLatency))
+        )
+        pendingSchedule = scheduled
+        return scheduled
+    }
+    
+    func measuredPlayback(of signal: Signal) -> ScheduledSignal? {
+        pendingSchedule?.signal == signal ? pendingSchedule : nil
+    }
+    
     func stop() {
         stopCount += 1
+        pendingSchedule = nil
     }
     
     func playRecall(times: Int, gap: TimeInterval) async {
@@ -41,7 +71,7 @@ class FakeSignalPlayer: SignalPlayer {
     }
     
     func duration(of signal: Signal) -> TimeInterval {
-        0
+        signal == .go ? gunDuration : 0
     }
     
     func logTimingDiagnostics(label: String) {

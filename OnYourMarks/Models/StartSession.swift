@@ -42,9 +42,12 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     case monitoringStarted
     case monitoringStopped
     
-    /// Current meaning: App asked local audio system to play the gun
-    /// Upcoming: replace with schedule for precise timing
-    case gunPlaybackRequest
+    /// The gun was placed on the audio clock; the event time is when it will be heard.
+    case gunScheduled
+    
+    /// Read back from the audio render timeline after the gun started;
+    /// the event time is when it was heard.
+    case gunPlaybackMeasured
     
     case movementObserved
     

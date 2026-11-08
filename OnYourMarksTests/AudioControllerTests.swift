@@ -5,6 +5,7 @@
 
 import Testing
 import AVFoundation
+import QuartzCore
 @testable import OnYourMarks
 
 /// Runs against the real audio session, which the simulator supports.
@@ -200,6 +201,112 @@ struct AudioControllerTests {
         await settle()
         
         #expect(recorder.reasons.isEmpty)
+    }
+
+    // MARK: - Scheduling
+    
+    private func now() -> MonotonicTimestamp {
+        MonotonicTimestamp(seconds: CACurrentMediaTime())
+    }
+    
+    /// The simulator's virtual audio device runs about 0.1 % off the host
+    /// clock, so its sample-to-host conversions drift by ~1 ms per second.
+    /// Real hardware keeps both clocks within parts per million.
+    private var schedulingTolerance: TimeInterval {
+        #if targetEnvironment(simulator)
+        0.002
+        #else
+        OutputTiming.maximumScheduleDeviation
+        #endif
+    }
+    
+    @Test
+    func scheduledSignalStartsWhereScheduled() async throws {
+        let (controller, _) = try await activeController()
+        let target = MonotonicTimestamp(seconds: now().seconds + 0.3)
+        
+        let scheduled = try #require(controller.schedule(.go, at: target))
+        #expect(scheduled.renderStart == target)
+        #expect(controller.measuredPlayback(of: .go) == nil, "measured before it started")
+        
+        // Measured shortly after the start, as the engine does.
+        try await Task.sleep(for: .seconds(0.35))
+        
+        let measured = try #require(controller.measuredPlayback(of: .go))
+        let deviation = measured.renderStart.seconds - target.seconds
+        Attachment.record("\(deviation * 1_000_000) µs", named: "Gun deviation from schedule")
+        
+        #expect(
+            abs(deviation) < schedulingTolerance,
+            "gun started \(deviation * 1_000_000) µs from its schedule"
+        )
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func schedulingTooSoonIsPushedBack() async throws {
+        let (controller, _) = try await activeController()
+        let before = now()
+        
+        let scheduled = try #require(controller.schedule(.go, at: MonotonicTimestamp(seconds: before.seconds - 1)))
+        
+        let lead = OutputTiming.minimumLead(ioBufferDuration: AVAudioSession.sharedInstance().ioBufferDuration)
+        #expect(scheduled.renderStart.seconds >= before.seconds + lead)
+        
+        try await Task.sleep(for: .seconds(lead + 0.05))
+        let measured = try #require(controller.measuredPlayback(of: .go))
+        #expect(abs(measured.renderStart.seconds - scheduled.renderStart.seconds) < schedulingTolerance)
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func stopCancelsScheduledSignal() async throws {
+        let (controller, _) = try await activeController()
+        
+        _ = try #require(controller.schedule(.go, at: MonotonicTimestamp(seconds: now().seconds + 0.2)))
+        controller.stop()
+        
+        try await Task.sleep(for: .seconds(0.4))
+        
+        #expect(controller.measuredPlayback(of: .go) == nil)
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func audibleOnsetIncludesOnsetOffsetAndLatency() async throws {
+        let (controller, _) = try await activeController()
+        
+        let scheduled = try #require(controller.schedule(.go, at: MonotonicTimestamp(seconds: now().seconds + 0.2)))
+        let onset = try #require(controller.onsetOffsets[.go])
+        
+        let delay = scheduled.audibleOnset.best.seconds - scheduled.renderStart.seconds
+        let session = AVAudioSession.sharedInstance()
+        Attachment.record(
+            """
+            render to audible onset: \(delay * 1000) ms
+            onset in file: \(onset * 1000) ms
+            uncertainty: ±\((scheduled.audibleOnset.latest.seconds - scheduled.audibleOnset.best.seconds) * 1000) ms
+            session outputLatency: \(session.outputLatency * 1000) ms, ioBuffer: \(session.ioBufferDuration * 1000) ms
+            route: \(session.currentRoute.outputs.map { "\($0.portName) [\($0.portType.rawValue)]" }.joined(separator: ", "))
+            """,
+            named: "Output timing"
+        )
+        
+        #expect(delay >= onset, "render to audible onset \(delay * 1000) ms, onset \(onset * 1000) ms")
+        #expect(scheduled.audibleOnset.earliest <= scheduled.audibleOnset.best)
+        
+        controller.stop()
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func scheduleFailsWithoutActiveSession() {
+        let controller = AudioController(theme: .eng1)
+        
+        #expect(controller.schedule(.go, at: now()) == nil)
     }
 }
 

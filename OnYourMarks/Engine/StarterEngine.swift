@@ -7,6 +7,7 @@
 
 import Foundation
 import QuartzCore
+import OSLog
 
 struct Phase: Equatable {
     let state: StarterState
@@ -38,8 +39,18 @@ final class StarterEngine {
     
     private var sequenceTask: Task<Void, Never>?
     
-    /// Kept until precise audio timing is implemented
+    /// When the gun is heard, set once it has started.
+    /// Before that, any movement is a false start.
     private var gunTime: TimeEstimate?
+    private var scheduledGun: ScheduledSignal?
+    
+    /// Long enough for the first render cycles to have passed.
+    private static let gunMeasurementDelay: TimeInterval = 0.05
+    
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
+        category: "Engine"
+    )
     
     private var monitoringActive: Bool = false
     
@@ -86,6 +97,7 @@ final class StarterEngine {
         player.stop()
         
         gunTime = nil
+        scheduledGun = nil
         lastReactionTime = nil
         lastReactionEstimate = nil
         lastDecision = nil
@@ -134,6 +146,7 @@ final class StarterEngine {
         stopMovementMonitoring()
         
         gunTime = nil
+        scheduledGun = nil
         setState(.idle)
         isRunning = false
         
@@ -153,6 +166,7 @@ final class StarterEngine {
         stopMovementMonitoring()
         
         gunTime = nil
+        scheduledGun = nil
         setState(.idle)
         isRunning = false
         
@@ -257,39 +271,86 @@ final class StarterEngine {
             
             setState(phase.state)
             
-            if phase.state == .waitForStart {
+            switch phase.state {
+            case .waitForStart:
                 startMovementMonitoring()
-            }
-            // this currently ignores audio schedule latency
-            if phase.state == .start {
-                let time = TimeEstimate.exact(clock.now())
                 
-                gunTime = time
+                // The gun goes on the audio clock now, so the hold ends exactly
+                // as scheduled however late this task wakes up.
+                let requested = MonotonicTimestamp(seconds: clock.now().seconds + (phase.duration ?? 0))
                 
-                record(.gunPlaybackRequest, at: time, source: .audioLocal)
-            }
-            
-            if let signal = phase.signal {
-                guard player.play(signal) else {
-                    return .failed("Could not play \(signal)")
+                guard let gun = player.schedule(.go, at: requested) else {
+                    return .failed("Could not schedule \(Signal.go)")
                 }
                 
-                // Logged after the gun, so the diagnostics add no delay before it
-                if phase.state == .start {
-                    player.logTimingDiagnostics(label: "Immediately after gun")
-                }
+                scheduledGun = gun
+                record(.gunScheduled, at: gun.audibleOnset, source: .audioLocal)
                 
-                do {
-                    try await Task.sleep(for: .seconds(player.duration(of: signal)))
-                } catch {
-                    return .cancelled
+                // Off the timing path: the gun no longer depends on this task.
+                player.logTimingDiagnostics(label: "Gun scheduled")
+                
+                guard await sleep(until: gun.renderStart) else { return .cancelled }
+                
+            case .start:
+                // Already playing from the schedule.
+                gunTime = scheduledGun?.audibleOnset
+                
+                // Read back early: the estimate extrapolates over the time
+                // since the start, so any clock drift grows with it.
+                let duration = player.duration(of: .go)
+                let measureAfter = min(Self.gunMeasurementDelay, duration)
+                
+                guard await sleep(for: measureAfter) else { return .cancelled }
+                recordMeasuredGun()
+                guard await sleep(for: duration - measureAfter) else { return .cancelled }
+                
+            default:
+                if let signal = phase.signal {
+                    guard player.play(signal) else {
+                        return .failed("Could not play \(signal)")
+                    }
+                    
+                    guard await sleep(for: player.duration(of: signal)) else { return .cancelled }
+                } else if let duration = phase.duration {
+                    guard await sleep(for: duration) else { return .cancelled }
                 }
-            } else if let duration = phase.duration {
-                do { try await Task.sleep(for: .seconds(duration)) }
-                catch { return .cancelled }
             }
         }
         return .completed
+    }
+    
+    /// False if cancelled.
+    private func sleep(for seconds: TimeInterval) async -> Bool {
+        do {
+            try await Task.sleep(for: .seconds(max(0, seconds)))
+            return true
+        } catch {
+            return false
+        }
+    }
+    
+    private func sleep(until time: MonotonicTimestamp) async -> Bool {
+        await sleep(for: time.seconds - clock.now().seconds)
+    }
+    
+    /// Records when the gun was actually heard, as read back from the render timeline.
+    private func recordMeasuredGun() {
+        guard let scheduled = scheduledGun else { return }
+        
+        guard let measured = player.measuredPlayback(of: .go) else {
+            logger.error("Gun playback could not be measured")
+            return
+        }
+        
+        record(.gunPlaybackMeasured, at: measured.audibleOnset, source: .audioLocal)
+        
+        let deviation = measured.renderStart.seconds - scheduled.renderStart.seconds
+        
+        if abs(deviation) > OutputTiming.maximumScheduleDeviation {
+            logger.error("Gun started \(deviation * 1000, format: .fixed(precision: 3)) ms off its schedule")
+        } else {
+            logger.info("Gun started \(deviation * 1_000_000, format: .fixed(precision: 1)) µs from its schedule")
+        }
     }
     
     func buildSequence(config: StartConfig) -> [Phase] {
