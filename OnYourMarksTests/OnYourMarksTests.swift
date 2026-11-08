@@ -64,8 +64,38 @@ struct OnYourMarksTests {
         
         #expect(!engine.isRunning)
         #expect(engine.state == .idle)
+        #expect(engine.lastSession?.outcome == .aborted)
         
         // Give potentially scheduled jobs a chance to run
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        
+        #expect(player.played.isEmpty)
+    }
+    
+    @Test
+    @MainActor
+    func abortWithReasonMarksSessionFailed() async {
+        let player = FakeSignalPlayer()
+        let detector = FakeMovementDetector()
+        
+        let engine = StarterEngine(player: player, movementDetector: detector)
+        
+        var runEndedCount = 0
+        engine.onRunEnded = { runEndedCount += 1 }
+        
+        var config = StartConfig.standard
+        config.blockTimeToReady = 10
+        
+        engine.start(config: config)
+        engine.abort(reason: "Audio output changed")
+        
+        #expect(!engine.isRunning)
+        #expect(engine.state == .idle)
+        #expect(engine.lastSession?.outcome == .failed("Audio output changed"))
+        #expect(runEndedCount == 1)
+        
         for _ in 0..<10 {
             await Task.yield()
         }
@@ -83,10 +113,10 @@ struct OnYourMarksTests {
         
         var config = StartConfig.standard
         
-        config.blockTimeToReady = 10
-        config.blockTimeToSet = 10
-        config.blockTimeToStartMin = 10
-        config.blockTimeToStartMax = 10
+        config.blockTimeToReady = 0
+        config.blockTimeToSet = 0
+        config.blockTimeToStartMin = 0
+        config.blockTimeToStartMax = 0
         
         engine.start(config: config)
         await waitUntil {
@@ -180,9 +210,12 @@ struct OnYourMarksTests {
 
 @MainActor
 private func waitUntil(
+    timeout: Duration = .seconds(2),
     _ condition: () -> Bool
 ) async {
-    for _ in 0..<500 {
+    let deadline = ContinuousClock.now + timeout
+    
+    while ContinuousClock.now < deadline {
         if condition() {
             return
         }

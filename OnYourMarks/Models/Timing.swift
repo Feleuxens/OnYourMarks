@@ -43,8 +43,8 @@ nonisolated struct TimeEstimate: Equatable, Sendable {
     func duration(since reference: TimeEstimate) -> DurationEstimate {
         DurationEstimate(
             best: best.seconds - reference.best.seconds,
-            earliest: earliest.seconds - reference.earliest.seconds,
-            latest: latest.seconds - reference.latest.seconds
+            earliest: earliest.seconds - reference.latest.seconds,
+            latest: latest.seconds - reference.earliest.seconds
         )
     }
 }

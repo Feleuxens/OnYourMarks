@@ -22,7 +22,7 @@ struct TrackBackground: View {
     }
 }
 
-struct TrackLanes: Shape {
+nonisolated struct TrackLanes: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         for i in 0..<4 {

@@ -108,14 +108,9 @@ struct StarterView: View {
             Text(vm.errorMessage ?? "")
         }
         .onChange(of: scenePhase) { _, newPase in
-            guard newPase == .active else { return }
+            guard newPase == .background else { return }
             
-            if vm.isRunning {
-                vm.abort()
-            }
-            if vm.cameraEnabled {
-                vm.disableCamera()
-            }
+            vm.handleEnteredBackground()
             UIApplication.shared.isIdleTimerDisabled = false
         }
     }

@@ -9,6 +9,7 @@ import AVFoundation
 import Vision
 import QuartzCore
 import OSLog
+import Synchronization
 
 @Observable
 final class CameraMovementDetector: NSObject, MovementDetector {
@@ -25,15 +26,14 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let frameQueue = DispatchQueue(label: "camera.frame")
+    /// Only used from frameQueue, which is serial, so it is never shared between threads.
+    private nonisolated(unsafe) let poseRequest = VNDetectHumanBodyPoseRequest()
     private let sessionQueue = DispatchQueue(label: "camera.session")
-    private let poseRequest = VNDetectHumanBodyPoseRequest()
 
     private(set) var isMonitoring = false
-    private var baseline: [VNHumanBodyPoseObservation.JointName: CGPoint]?
-    private var baselineFrames = 0
-    private var hasTriggered = false
-
-    private let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] =
+    private nonisolated let motionState = Mutex(MotionState())
+    
+    private nonisolated static let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] =
         [
             .root, .neck,
             .leftHip, .rightHip,
@@ -44,8 +44,6 @@ final class CameraMovementDetector: NSObject, MovementDetector {
             .leftAnkle, .rightAnkle
         ]
     private let minConfidence: Float = 0.3
-    private let baselineFrameCount = 8
-    private let movementThreshold: CGFloat = 0.05
     
     func configureIfNeeded() -> Bool {
         if isConfigured { return true }
@@ -89,16 +87,22 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     }
 
     func startSession() {
-        sessionQueue.async { [weak self] in
-            guard let self, !self.session.isRunning else { return }
-            self.session.startRunning()
+        // AVCaptureSession isn't sendable for run on serial sessionQueue
+        // Configuration is on main actor and completes before the first start is dispatched
+        nonisolated(unsafe) let session = self.session
+        
+        sessionQueue.async {
+            guard !session.isRunning else { return }
+            session.startRunning()
         }
     }
 
     func stopSession() {
-        sessionQueue.async { [weak self] in
-            guard let self, self.session.isRunning else { return }
-            self.session.stopRunning()
+        nonisolated(unsafe) let session = self.session
+        
+        sessionQueue.async {
+            guard session.isRunning else { return }
+            session.stopRunning()
         }
     }
     
@@ -107,41 +111,42 @@ final class CameraMovementDetector: NSObject, MovementDetector {
             "Active camera format max FPS:",
             activeFormatMaximumFrameRate() ?? 0
         )
-        frameQueue.async { [weak self] in
-            guard let self else { return }
-            guard let device = self.device else { return }
-            
-            self.setFrameRate(60, on: device)
-            
-            self.baseline = nil
-            self.baselineFrames = 0
-            self.hasTriggered = false
-            self.isMonitoring = true
-        }
+        
+        motionState.withLock { $0.reset(monitoring: true) }
+        isMonitoring = true
+        
+        setFrameRate(60)
     }
+    
     func stopMonitoring() {
-        frameQueue.async { [weak self] in
-            guard let self else { return }
-            
-            // reset variables even if no device exists
-            self.isMonitoring = false
-            self.baseline = nil
-            self.baselineFrames = 0
-            self.hasTriggered = false
-            
-            guard let device = self.device else { return }
-            
-            self.setFrameRate(15, on: device)
+        motionState.withLock { $0.reset(monitoring: false) }
+        isMonitoring = false
+        
+        setFrameRate(15)
+    }
+    
+    private func setFrameRate(_ requestedFps: Double) {
+        guard requestedFps > 0, let device else { return }
+        
+        // since AVCaptureDevice isn't Sendable, it is only reconfigured
+        // on the serial sessionQueue
+        nonisolated(unsafe) let captureDevice = device
+        let logger = self.logger
+        
+        sessionQueue.async {
+            CameraMovementDetector.applyFrameRate(requestedFps, to: captureDevice, logger: logger)
         }
     }
     
-    private func setFrameRate(_ requestedFps: Double, on device: AVCaptureDevice) {
-        guard requestedFps > 0 else { return }
-        
-        guard let fps = nearestSupportedFrameRate(to: requestedFps, on: device) else { return }
+    private nonisolated static func applyFrameRate(
+        _ requestFps: Double,
+        to device: AVCaptureDevice,
+        logger: Logger
+    ) {
+        guard let fps = nearestSupportedFrameRate(to: requestFps, on: device) else { return }
         
         let frameDuration = CMTime(seconds: 1.0 / fps, preferredTimescale: 60_000)
-
+        
         do {
             try device.lockForConfiguration()
             
@@ -154,7 +159,7 @@ final class CameraMovementDetector: NSObject, MovementDetector {
         }
     }
     
-    private func nearestSupportedFrameRate(to requestedFps: Double, on device: AVCaptureDevice) -> Double? {
+    private nonisolated static func nearestSupportedFrameRate(to requestedFps: Double, on device: AVCaptureDevice) -> Double? {
         let ranges = device.activeFormat.videoSupportedFrameRateRanges
         
         guard !ranges.isEmpty else { return nil }
@@ -197,8 +202,8 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     }
 }
 
-extension CameraMovementDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput,
+extension CameraMovementDetector: nonisolated AVCaptureVideoDataOutputSampleBufferDelegate {
+    nonisolated func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -206,6 +211,7 @@ extension CameraMovementDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
         let frameTime = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right)
+        
         guard (try? handler.perform([poseRequest])) != nil,
               let observation = poseRequest.results?.first,
               let points = try? observation.recognizedPoints(.all) else {
@@ -213,49 +219,90 @@ extension CameraMovementDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         var current: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
-        for joint in jointsOfInterest {
+        for joint in Self.jointsOfInterest {
             if let p = points[joint], p.confidence >= minConfidence {
                 current[joint] = p.location
             }
         }
-
-        let snapshot = current
+        
+        let joints = current
         DispatchQueue.main.async { [weak self] in
-            self?.onJoints?(snapshot)
+            self?.onJoints?(joints)
         }
         
-        guard isMonitoring, !hasTriggered, !current.isEmpty else {
-            return
+        let movementDetected = motionState.withLock { state in
+            state.process(joints)
         }
         
-        if baselineFrames < baselineFrameCount {
-            mergeBaseline(current)
-            baselineFrames += 1
-            return
-        }
-        guard let baseline else { return }
-
-        var maxDisp: CGFloat = 0
-        for (joint, pos) in current {
-            if let base = baseline[joint] {
-                maxDisp = max(maxDisp, hypot(pos.x - base.x, pos.y - base.y))
+        guard movementDetected else { return }
+        
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.onMovement?(frameTime)
             }
         }
-
-        if maxDisp > movementThreshold {
-            hasTriggered = true
-            let callback = onMovement
-            DispatchQueue.main.async { callback?(frameTime) }
-        }
     }
+}
 
-    private func mergeBaseline(_ current: [VNHumanBodyPoseObservation.JointName: CGPoint]) {
-        guard baseline != nil else { baseline = current; return }
-        for (joint, pos) in current {
+nonisolated struct MotionState {
+    static let baselineFrameCount = 8
+    static let movementThreshold: CGFloat = 0.05
+    
+    private var isMonitoring = false
+    private var hasTriggered = false
+    private var baseline: [VNHumanBodyPoseObservation.JointName: CGPoint]?
+    private var baselineFrames = 0
+    
+    mutating func reset(monitoring: Bool) {
+        isMonitoring = monitoring
+        hasTriggered = false
+        baseline = nil
+        baselineFrames = 0
+    }
+    
+    mutating func process(
+        _ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+    ) -> Bool {
+        guard isMonitoring, !hasTriggered, !joints.isEmpty else {
+            return false
+        }
+        
+        if baselineFrames < Self.baselineFrameCount {
+            mergeBaseline(joints)
+            baselineFrames += 1
+            return false
+        }
+        
+        guard let baseline else { return false }
+        
+        var maxDisplacement: CGFloat = 0
+        for (joint, position) in joints {
+            if let base = baseline[joint] {
+                maxDisplacement = max(maxDisplacement, hypot(position.x - base.x, position.y - base.y))
+            }
+        }
+        
+        guard maxDisplacement > Self.movementThreshold else {
+            return false
+        }
+        
+        hasTriggered = true
+        return true
+    }
+    
+    private mutating func mergeBaseline(
+        _ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+    ) {
+        guard baseline != nil else {
+            baseline = joints
+            return
+        }
+        
+        for (joint, position) in joints {
             if let existing = baseline?[joint] {
-                baseline?[joint] = CGPoint(x: (existing.x + pos.x) / 2, y: (existing.y + pos.y) / 2)
+                baseline?[joint] = CGPoint(x: (existing.x + position.x) / 2, y: (existing.y + position.y) / 2)
             } else {
-                baseline?[joint] = pos
+                baseline?[joint] = position
             }
         }
     }

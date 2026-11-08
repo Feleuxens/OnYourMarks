@@ -40,6 +40,10 @@ final class FakeSignalPlayer: SignalPlayer {
     func duration(of signal: Signal) -> TimeInterval {
         0
     }
+    
+    func logTimingDiagnostics(label: String) {
+        return  // not needed in tests
+    }
 }
 
 final class FakeMovementDetector: MovementDetector {

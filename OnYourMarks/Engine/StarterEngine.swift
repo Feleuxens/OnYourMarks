@@ -124,7 +124,7 @@ final class StarterEngine {
         }
     }
     
-    func abort() {
+    func abort(reason: String? = nil) {
         guard isRunning else { return }
         
         sequenceTask?.cancel()
@@ -138,7 +138,7 @@ final class StarterEngine {
         isRunning = false
         
         finalizeSession(
-            outcome: .aborted
+            outcome: reason.map(StartSessionOutcome.failed) ?? .aborted
         )
         
         onRunEnded?()
@@ -272,6 +272,11 @@ final class StarterEngine {
             if let signal = phase.signal {
                 guard player.play(signal) else {
                     return .failed("Could not play \(signal)")
+                }
+                
+                // Logged after the gun, so the diagnostics add no delay before it
+                if phase.state == .start {
+                    player.logTimingDiagnostics(label: "Immediately after gun")
                 }
                 
                 do {

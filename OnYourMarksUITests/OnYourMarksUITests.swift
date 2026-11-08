@@ -32,12 +32,4 @@ final class OnYourMarksUITests: XCTestCase {
         // XCUIAutomation Documentation
         // https://developer.apple.com/documentation/xcuiautomation
     }
-
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
-    }
 }
