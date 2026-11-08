@@ -128,14 +128,12 @@ class StarterViewModel {
     }
     
     private func runEnded() {
-        let delay: Duration
-        
-        switch engine.lastSession?.outcome {
+        let delay: Duration = switch engine.lastSession?.outcome {
         case .completed?, .falseStart?:
-            delay = musicResumeDelay
+            musicResumeDelay
         default:
-            // on user abort or failue the audio can resume immediately
-            delay = .zero
+            // on user abort or failure the audio can resume immediately
+            .zero
         }
         
         let previous = sessionDeactivationTask

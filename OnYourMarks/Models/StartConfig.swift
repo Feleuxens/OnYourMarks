@@ -5,7 +5,7 @@
 //  Created by Felix on 11.06.26.
 //
 
-struct StartConfig: Codable {
+nonisolated struct StartConfig: Codable, Sendable {
     static let readyRange: ClosedRange<Double> = 0...20
     static let setRange: ClosedRange<Double> = 0...30
     static let startRange: ClosedRange<Double> = 0...10
@@ -98,7 +98,7 @@ struct StartConfig: Codable {
             standingTimeToStartMax.clamped(to: Self.startRange)
     }
 }
-extension Comparable {
+nonisolated extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(range.upperBound, max(self, range.lowerBound))
     }

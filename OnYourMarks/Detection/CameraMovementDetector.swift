@@ -25,10 +25,10 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     private var device: AVCaptureDevice?
     let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
-    private let frameQueue = DispatchQueue(label: "camera.frame")
+    private let frameQueue = DispatchSerialQueue(label: "camera.frame")
     /// Only used from frameQueue, which is serial, so it is never shared between threads.
     private nonisolated(unsafe) let poseRequest = VNDetectHumanBodyPoseRequest()
-    private let sessionQueue = DispatchQueue(label: "camera.session")
+    private let sessionQueue = DispatchSerialQueue(label: "camera.session")
 
     private(set) var isMonitoring = false
     private nonisolated let motionState = Mutex(MotionState())
@@ -107,10 +107,7 @@ final class CameraMovementDetector: NSObject, MovementDetector {
     }
     
     func startMonitoring() {
-        print(
-            "Active camera format max FPS:",
-            activeFormatMaximumFrameRate() ?? 0
-        )
+        logger.debug("Active camera format max FPS: \(self.activeFormatMaximumFrameRate() ?? 0)")
         
         motionState.withLock { $0.reset(monitoring: true) }
         isMonitoring = true
@@ -226,7 +223,7 @@ extension CameraMovementDetector: nonisolated AVCaptureVideoDataOutputSampleBuff
         }
         
         let joints = current
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.onJoints?(joints)
         }
         
@@ -236,10 +233,8 @@ extension CameraMovementDetector: nonisolated AVCaptureVideoDataOutputSampleBuff
         
         guard movementDetected else { return }
         
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                self?.onMovement?(frameTime)
-            }
+        Task { @MainActor [weak self] in
+            self?.onMovement?(frameTime)
         }
     }
 }

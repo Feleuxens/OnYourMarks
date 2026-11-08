@@ -5,7 +5,7 @@
 //  Created by Felix on 12.06.26.
 //
 
-enum SoundTheme: String, Codable, CaseIterable, Identifiable {
+nonisolated enum SoundTheme: String, Codable, CaseIterable, Identifiable, Sendable {
     case eng1
     
     var id: Self { self }

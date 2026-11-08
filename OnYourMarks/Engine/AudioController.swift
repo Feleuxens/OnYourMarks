@@ -41,7 +41,7 @@ final class AudioController: AudioSessionPlayer {
     
     private let timingDiagnostics = AudioTimingDiagnostics()
     
-    nonisolated(unsafe) private var observerTokens: [NSObjectProtocol] = []
+    private var observerTokens: [NotificationCenter.ObservationToken] = []
         
     init(theme: SoundTheme = .eng1) {
         self.theme = theme
@@ -51,7 +51,7 @@ final class AudioController: AudioSessionPlayer {
         observeSystemNotifications()
     }
     
-    deinit {
+    isolated deinit {
         for token in observerTokens {
             NotificationCenter.default.removeObserver(token)
         }
@@ -274,52 +274,26 @@ final class AudioController: AudioSessionPlayer {
         let center = NotificationCenter.default
         let session = AVAudioSession.sharedInstance()
         
-        observerTokens.append(
-            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.handleRouteChange()
-                }
-            }
-        )
-        
-        observerTokens.append(
-            center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] notification in
-                MainActor.assumeIsolated {
-                    self?.handleSessionBecameInactive()
-                }
-            }
-        )
-        
-        observerTokens.append(
-            center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] notification in
-                let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-                let began = rawType.flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began
-                
-                guard began else { return }
-                
-                MainActor.assumeIsolated {
-                    self?.handleSessionBecameInactive()
-                }
-            }
-        )
-        
-        observerTokens.append(
-            center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.handleMediaServicesReset()
-                }
-            }
-        )
-        
-        observerTokens.append(
-            center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] notification in
-                let senderID = (notification.object as AnyObject?).map { ObjectIdentifier($0) }
-                
-                MainActor.assumeIsolated {
-                    self?.handleEngineConfigurationChange(senderID: senderID)
-                }
-            }
-        )
+        // The async messages may be posted on any thread; the handlers hop to the main actor.
+        observerTokens = [
+            center.addObserver(of: session, for: AVAudioSession.RouteDidChangeMessage.self) { [weak self] _ in
+                await self?.handleRouteChange()
+            },
+            
+            // Since iOS 27 this also covers interruptions (calls, alarms),
+            // which replaces observing interruptionNotification.
+            center.addObserver(for: AVAudioSession.DidBecomeInactiveMessage.self) { [weak self] _ in
+                self?.handleSessionBecameInactive()
+            },
+            
+            center.addObserver(of: session, for: AVAudioSession.MediaServicesWereResetMessage.self) { [weak self] _ in
+                await self?.handleMediaServicesReset()
+            },
+            
+            center.addObserver(for: AVAudioEngine.ConfigurationDidChangeMessage.self) { [weak self] message in
+                await self?.handleEngineConfigurationChange(senderID: message.engineID)
+            },
+        ]
     }
     
     private func handleRouteChange() {
@@ -339,8 +313,9 @@ final class AudioController: AudioSessionPlayer {
         )
     }
     
-    private func handleSessionBecameInactive() {
-        // Interruptions and inactivation can both arrive; only the first reports.
+    /// Internal so tests can call it: the system's notification carries a
+    /// deactivation context that can't be constructed outside AVFAudio.
+    func handleSessionBecameInactive() {
         guard isSessionActive else { return }
         
         tearDownPlayback()
@@ -392,7 +367,7 @@ final class AudioController: AudioSessionPlayer {
     }
 }
 
-enum Signal: CaseIterable {
+nonisolated enum Signal: CaseIterable, Sendable {
     case onYourMarks
     case set
     case go
@@ -432,6 +407,42 @@ nonisolated enum AudioSessionError: LocalizedError {
         switch self {
         case .activationRefused:
             return "The system did not activate the audio session."
+        }
+    }
+}
+
+// Typed forms of the notifications the SDK doesn't offer messages for yet.
+
+extension AVAudioSession {
+    nonisolated struct RouteDidChangeMessage: NotificationCenter.AsyncMessage {
+        typealias Subject = AVAudioSession
+        
+        static var name: Notification.Name { AVAudioSession.routeChangeNotification }
+        
+        static func makeMessage(_ notification: Notification) -> Self? { Self() }
+    }
+    
+    nonisolated struct MediaServicesWereResetMessage: NotificationCenter.AsyncMessage {
+        typealias Subject = AVAudioSession
+        
+        static var name: Notification.Name { AVAudioSession.mediaServicesWereResetNotification }
+        
+        static func makeMessage(_ notification: Notification) -> Self? { Self() }
+    }
+}
+
+extension AVAudioEngine {
+    nonisolated struct ConfigurationDidChangeMessage: NotificationCenter.AsyncMessage {
+        typealias Subject = AVAudioEngine
+        
+        /// The engine that changed. Observed without a subject, because
+        /// the engine is replaced when media services are reset.
+        let engineID: ObjectIdentifier?
+        
+        static var name: Notification.Name { .AVAudioEngineConfigurationChange }
+        
+        static func makeMessage(_ notification: Notification) -> Self? {
+            Self(engineID: (notification.object as AnyObject?).map(ObjectIdentifier.init))
         }
     }
 }
