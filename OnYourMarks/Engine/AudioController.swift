@@ -332,7 +332,7 @@ final class AudioController: AudioSessionPlayer {
         }
     }
     
-    func playRecall(times: Int = 3, gap: TimeInterval = 0.35) async {
+    func playRecall(times: Int, gap: TimeInterval) async {
         guard times > 0 else { return }
         
         for index in 0..<times {

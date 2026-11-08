@@ -5,7 +5,6 @@
 //  Created by Felix on 21.06.26.
 //
 
-// Views/SettingsView.swift
 import SwiftUI
 
 struct SettingsView: View {
@@ -17,32 +16,32 @@ struct SettingsView: View {
             TrackBackground()
             Form {
                 Section("Signal") {
-                    Picker("Ton", selection: $vm.config.soundTheme) {
+                    Picker("Sound", selection: $vm.config.soundTheme) {
                         ForEach(SoundTheme.allCases) { theme in
                             Text(theme.displayName).tag(theme)
                         }
                     }
                 }
                 
-                Section("Startsequenz (Block)") {
-                    DelaySlider(id: 1, title: "Time until \"On Your Marks\"", time: $vm.config.blockTimeToReady, isRunning: vm.isRunning, range: StartConfig.readyRange, step: 1, focusedSlider: $focusedSlider)
-                    DelaySlider(id: 2, title: "Time until \"Set\"", time: $vm.config.blockTimeToSet, isRunning: vm.isRunning, range: StartConfig.setRange, step: 1, focusedSlider: $focusedSlider)
-                    DelaySlider(id: 3, title: "Min time until Start", time: $vm.config.blockTimeToStartMin, isRunning: vm.isRunning, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
-                    DelaySlider(id: 4, title: "Max time until Start", time: $vm.config.blockTimeToStartMax, isRunning: vm.isRunning, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
+                Section("Start sequence (block)") {
+                    DelaySlider(id: 1, title: "Time until \"On Your Marks\"", time: $vm.config.blockTimeToReady, range: StartConfig.readyRange, step: 1, focusedSlider: $focusedSlider)
+                    DelaySlider(id: 2, title: "Time until \"Set\"", time: $vm.config.blockTimeToSet, range: StartConfig.setRange, step: 1, focusedSlider: $focusedSlider)
+                    DelaySlider(id: 3, title: "Min time until Start", time: $vm.config.blockTimeToStartMin, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
+                    DelaySlider(id: 4, title: "Max time until Start", time: $vm.config.blockTimeToStartMax, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
                 }
-                Section("Startsequenz (Hochstart)") {
-                    DelaySlider(id: 5, title: "Time until \"On Your Marks\"", time: $vm.config.standingTimeToReady, isRunning: vm.isRunning, range: StartConfig.readyRange, step: 1, focusedSlider: $focusedSlider)
-                    DelaySlider(id: 6, title: "Min time until Start", time: $vm.config.standingTimeToStartMin, isRunning: vm.isRunning, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
-                    DelaySlider(id: 7, title: "Max time until Start", time: $vm.config.standingTimeToStartMax, isRunning: vm.isRunning, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
+                Section("Start sequence (standing)") {
+                    DelaySlider(id: 5, title: "Time until \"On Your Marks\"", time: $vm.config.standingTimeToReady, range: StartConfig.readyRange, step: 1, focusedSlider: $focusedSlider)
+                    DelaySlider(id: 6, title: "Min time until Start", time: $vm.config.standingTimeToStartMin, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
+                    DelaySlider(id: 7, title: "Max time until Start", time: $vm.config.standingTimeToStartMax, range: StartConfig.startRange, step: 0.1, focusedSlider: $focusedSlider)
                 }
                 
                 Section {
-                    Button("Auf Standard zurücksetzen", role: .destructive) {
+                    Button("Reset to defaults", role: .destructive) {
                         withAnimation(.easeInOut) { vm.resetConfig() }
                     }
                 }
             }
-            .navigationTitle("Einstellungen")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.immediately)

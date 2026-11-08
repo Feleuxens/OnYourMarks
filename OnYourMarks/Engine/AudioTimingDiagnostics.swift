@@ -1,5 +1,5 @@
 //
-//  AudioTimingSnapshot.swift
+//  AudioTimingDiagnostics.swift
 //  OnYourMarks
 //
 //  Created by Felix on 28.08.26.

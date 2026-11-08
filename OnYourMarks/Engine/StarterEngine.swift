@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import QuartzCore
 import OSLog
 
 struct Phase: Equatable {
@@ -15,14 +14,13 @@ struct Phase: Equatable {
     let signal: Signal?
 }
 
-
 @Observable
 @MainActor
 final class StarterEngine {
     private(set) var state: StarterState = .idle
     private(set) var isRunning: Bool = false
     
-    /// Kept for compatability with current UI
+    /// Same as `lastReactionEstimate?.best`; kept for a simple reaction-time display.
     private(set) var lastReactionTime: TimeInterval?
     
     private(set) var lastReactionEstimate: DurationEstimate?
@@ -46,6 +44,10 @@ final class StarterEngine {
     
     /// Long enough for the first render cycles to have passed.
     private static let gunMeasurementDelay: TimeInterval = 0.05
+    
+    /// Recall shots after a false start, and the pause between them.
+    private static let recallShots = 3
+    private static let recallGap: TimeInterval = 0.30
     
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
@@ -239,7 +241,6 @@ final class StarterEngine {
         }
     }
     
-    
     private func triggerFalseStart() {
         guard isRunning, state != .falseStart else { return }
         
@@ -253,7 +254,7 @@ final class StarterEngine {
         sequenceTask = Task { [weak self] in
             guard let self else { return }
             
-            await self.player.playRecall(times: 3, gap: 0.30)
+            await self.player.playRecall(times: Self.recallShots, gap: Self.recallGap)
             
             guard !Task.isCancelled else { return }
             
@@ -354,30 +355,28 @@ final class StarterEngine {
     }
     
     func buildSequence(config: StartConfig) -> [Phase] {
-        let profile = config.startType.profile
-        
-        switch profile.startType {
+        switch config.startType {
         case .block:
             return [
                 Phase(state: .preparing, duration: config.blockTimeToReady, signal: nil),
-                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
+                Phase(state: .onYourMarks, duration: nil, signal: .onYourMarks),
                 Phase(state: .waitForSet, duration: config.blockTimeToSet, signal: nil),
-                Phase(state: .set, duration: nil, signal: Signal.set),
+                Phase(state: .set, duration: nil, signal: .set),
                 Phase(state: .waitForStart, duration: randomTimeToStart(config.blockTimeToStartMin, config.blockTimeToStartMax), signal: nil),
-                Phase(state: .start, duration: nil, signal: Signal.go),
+                Phase(state: .start, duration: nil, signal: .go),
             ]
         case .standing:
             return [
                 Phase(state: .preparing, duration: config.standingTimeToReady, signal: nil),
-                Phase(state: .onYourMarks, duration: nil, signal: Signal.onYourMarks),
+                Phase(state: .onYourMarks, duration: nil, signal: .onYourMarks),
                 Phase(state: .waitForStart, duration: randomTimeToStart(config.standingTimeToStartMin, config.standingTimeToStartMax), signal: nil),
-                Phase(state: .start, duration: nil, signal: Signal.go),
+                Phase(state: .start, duration: nil, signal: .go),
             ]
         }
     }
     
     private func randomTimeToStart(_ a: Double, _ b: Double) -> TimeInterval {
-        return Double.random(in: min(a, b)...max(a, b))
+        Double.random(in: min(a, b)...max(a, b))
     }
     
     private func setState(_ newState: StarterState) {

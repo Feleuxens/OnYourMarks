@@ -107,8 +107,8 @@ struct StarterView: View {
         } message: {
             Text(vm.errorMessage ?? "")
         }
-        .onChange(of: scenePhase) { _, newPase in
-            guard newPase == .background else { return }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
             
             vm.handleEnteredBackground()
             UIApplication.shared.isIdleTimerDisabled = false

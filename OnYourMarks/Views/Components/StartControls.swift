@@ -14,11 +14,13 @@ struct StartControls: View {
 
     var body: some View {
         if isRunning {
-            Button("Abbrechen", action: onAbort)
+            Button("Abort", action: onAbort)
                 .buttonStyle(PillButtonStyle(fill: .secondary, text: .chalk))
+                .accessibilityIdentifier("abortButton")
         } else {
             Button("Start", action: onStart)
                 .buttonStyle(PillButtonStyle(fill: .signalYellow))
+                .accessibilityIdentifier("startButton")
         }
     }
 }

@@ -24,9 +24,7 @@ struct CameraPreview: UIViewRepresentable {
         return v
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {
-        //uiView.setNeedsLayout()
-    }
+    func updateUIView(_ uiView: PreviewView, context: Context) {}
     
     static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
         coordinator.detector.onJoints = nil

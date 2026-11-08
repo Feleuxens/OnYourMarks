@@ -7,7 +7,6 @@
 
 import AVFoundation
 import Vision
-import QuartzCore
 import OSLog
 import Synchronization
 

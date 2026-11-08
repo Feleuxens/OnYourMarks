@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import Foundation
-import QuartzCore
 
 @Observable
 @MainActor
@@ -33,8 +31,8 @@ class StarterViewModel {
     }
     
     private var cameraEnableTask: Task<Void, Never>?
-    /// Audio of other apps resume after the session is desctivated.
-    /// After a start that happens after a delay to let the runner start without distraction.
+    /// Other apps' audio resumes once the session is deactivated. After a start
+    /// that waits this long, so the runner can get going without distraction.
     private let musicResumeDelay: Duration
     private var sessionDeactivationTask: Task<Void, Never>?
     /// Set from the Start tap until the sequence runs (or the start was
@@ -201,24 +199,24 @@ class StarterViewModel {
             
             guard let self else { return }
             
-            // disableCamera can cancel this task and cleans it up
-            // here we block just further execution but don't need to cleanup
+            // stopCamera() cancels this task and cleans up after it,
+            // so a cancelled task only has to stop here.
             guard !Task.isCancelled else { return }
             
-            defer { self.cameraEnableTask = nil }
+            defer { cameraEnableTask = nil }
             
             guard granted else {
-                self.cameraPermissionDenied = true
+                cameraPermissionDenied = true
                 return
             }
-            self.cameraPermissionDenied = false
+            cameraPermissionDenied = false
             
-            guard self.cameraDetector.configureIfNeeded() else {
-                self.errorMessage = "The camera could not be configured."
+            guard cameraDetector.configureIfNeeded() else {
+                errorMessage = "The camera could not be configured."
                 return
             }
-            self.cameraDetector.startSession()
-            self.cameraEnabled = true
+            cameraDetector.startSession()
+            cameraEnabled = true
         }
     }
     

@@ -1,5 +1,5 @@
 //
-//  CameraToogleButton.swift
+//  CameraToggleButton.swift
 //  OnYourMarks
 //
 //  Created by Felix on 17.07.26.
@@ -15,7 +15,7 @@ struct CameraToggleButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: isOn ? "camera.fill" : "camera")
-                Text(isOn ? "Detection on" : "Detection off")
+                isOn ? Text("Detection on") : Text("Detection off")
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(isOn ? .warmInk : .chalk)

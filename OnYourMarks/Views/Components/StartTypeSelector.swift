@@ -12,12 +12,12 @@ struct StartTypeSelector: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            option(.block,    image: "figure.track.and.field",    label: "Block")
-            option(.standing, image: "figure.run", label: "Hochstart")
+            option(.block, image: "figure.track.and.field", label: "Block")
+            option(.standing, image: "figure.run", label: "Standing")
         }
     }
 
-    private func option(_ type: StartType, image: String, label: String) -> some View {
+    private func option(_ type: StartType, image: String, label: LocalizedStringKey) -> some View {
         Button {
             selection = type
         } label: {
@@ -40,7 +40,8 @@ struct StartTypeSelector: View {
                     .stroke(selection == type ? Color.chalk : .clear, lineWidth: 2)
             )
         }
-        .buttonStyle(.plain)   // sonst färbt SwiftUI das ganze Label blau
+        .buttonStyle(.plain)   // otherwise SwiftUI tints the whole label blue
+        .accessibilityIdentifier("startType.\(type)")
     }
 }
 

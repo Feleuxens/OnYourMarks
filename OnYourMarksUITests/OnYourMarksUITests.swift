@@ -11,9 +11,10 @@ import XCTest
 final class OnYourMarksUITests: XCTestCase {
     private var app: XCUIApplication!
 
-    private var startButton: XCUIElement { app.buttons["Start"] }
-    private var abortButton: XCUIElement { app.buttons["Abbrechen"] }
-    private var errorAlert: XCUIElement { app.alerts["OnYourMarks Error"] }
+    // Identifiers rather than labels, so the tests run in every language.
+    private var startButton: XCUIElement { app.buttons["startButton"] }
+    private var abortButton: XCUIElement { app.buttons["abortButton"] }
+    private var errorAlert: XCUIElement { app.alerts.firstMatch }
 
     override func setUp() async throws {
         continueAfterFailure = false
@@ -60,7 +61,7 @@ final class OnYourMarksUITests: XCTestCase {
     }
 
     func testControlsAreDisabledWhileRunning() {
-        let standing = app.buttons["Hochstart"]
+        let standing = app.buttons["startType.standing"]
         XCTAssertTrue(standing.isEnabled)
 
         startButton.tap()
@@ -101,5 +102,22 @@ final class OnYourMarksUITests: XCTestCase {
         XCTAssertFalse(errorAlert.exists)
 
         abortButton.tap()
+    }
+    
+    func testGermanInterfaceUsesTranslations() {
+        // Apps launched by UI tests don't inherit -testLanguage; set it directly.
+        app.terminate()
+        app.launchArguments += ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"]
+        app.launch()
+        
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["startType.standing"].label, "Hochstart")
+        
+        startButton.tap()
+        XCTAssertTrue(abortButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(abortButton.label, "Abbrechen")
+        
+        abortButton.tap()
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
     }
 }
