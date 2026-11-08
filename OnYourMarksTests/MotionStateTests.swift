@@ -68,7 +68,7 @@ struct MotionStateTests {
     func movementBelowThresholdDoesNotTrigger() {
         var state = calibrated()
 
-        var triggered = state.process(moved(by: MotionState.movementThreshold / 2))
+        let triggered = state.process(moved(by: MotionState.movementThreshold / 2))
         #expect(!triggered)
     }
 
@@ -86,7 +86,7 @@ struct MotionStateTests {
     func jointsMissingFromBaselineAreIgnored() {
         var state = calibrated()
 
-        var triggered = state.process([.leftKnee: CGPoint(x: 0.9, y: 0.9)])
+        let triggered = state.process([.leftKnee: CGPoint(x: 0.9, y: 0.9)])
         #expect(!triggered)
     }
 

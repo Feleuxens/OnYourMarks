@@ -95,29 +95,25 @@ struct SoundBufferTests {
     /// gun 23.63 ms, set 42.11 ms, on your marks 29.48 ms.
     /// If AVAudioFile trims the priming instead, the onsets are ~23.2 ms
     /// earlier. The printed values tell us which one the device plays.
-    @Test
+    @Test(arguments: SoundTheme.allCases, Signal.allCases)
     @MainActor
-    func bundledSignalsDecodeWithPlausibleOnset() throws {
-        for theme in SoundTheme.allCases {
-            for signal in Signal.allCases {
-                let name = theme.assetName(for: signal)
-                
-                let buffer = try SoundBufferLoader.loadBuffer(named: name)
-                
-                #expect(buffer.durationSeconds > 0.1, "\(name) is suspiciously short")
-                
-                let onset = try #require(
-                    AudioOnsetDetector.onsetOffset(in: buffer),
-                    "\(name) has no detectable onset"
-                )
-                
-                #expect(onset < 0.1, "\(name) onset \(onset) s is later than expected")
-                
-                print(
-                    "[SoundBufferTests] \(name): \(buffer.format.sampleRate) Hz, "
-                    + "\(buffer.frameLength) frames, onset \(onset * 1000) ms"
-                )
-            }
-        }
+    func bundledSignalDecodesWithPlausibleOnset(theme: SoundTheme, signal: Signal) throws {
+        let name = theme.assetName(for: signal)
+        
+        let buffer = try SoundBufferLoader.loadBuffer(named: name)
+        
+        #expect(buffer.durationSeconds > 0.1, "\(name) is suspiciously short")
+        
+        let onset = try #require(
+            AudioOnsetDetector.onsetOffset(in: buffer),
+            "\(name) has no detectable onset"
+        )
+        
+        #expect(onset < 0.1, "\(name) onset \(onset) s is later than expected")
+        
+        print(
+            "[SoundBufferTests] \(name): \(buffer.format.sampleRate) Hz, "
+            + "\(buffer.frameLength) frames, onset \(onset * 1000) ms"
+        )
     }
 }

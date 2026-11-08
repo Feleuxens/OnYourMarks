@@ -14,27 +14,28 @@ struct ConfigTests {
         return (ConfigStore(defaults: defaults), defaults)
     }
 
-    @Test
-    func settingOutOfRangeValuesClamps() {
+    @Test(arguments: [
+        (\StartConfig.blockTimeToReady, StartConfig.readyRange),
+        (\StartConfig.standingTimeToReady, StartConfig.readyRange),
+        (\StartConfig.blockTimeToSet, StartConfig.setRange),
+        (\StartConfig.blockTimeToStartMin, StartConfig.startRange),
+        (\StartConfig.blockTimeToStartMax, StartConfig.startRange),
+        (\StartConfig.standingTimeToStartMin, StartConfig.startRange),
+        (\StartConfig.standingTimeToStartMax, StartConfig.startRange),
+    ])
+    func settingOutOfRangeValuesClamps(
+        property: WritableKeyPath<StartConfig, Double> & Sendable,
+        range: ClosedRange<Double>
+    ) {
         var config = StartConfig.standard
-
-        config.blockTimeToReady = -5
-        config.blockTimeToSet = 999
-        config.blockTimeToStartMin = -1
-        config.blockTimeToStartMax = 11
-        config.standingTimeToReady = 21
-        config.standingTimeToStartMin = -3
-        config.standingTimeToStartMax = 100
-
-        #expect(config.blockTimeToReady == StartConfig.readyRange.lowerBound)
-        #expect(config.blockTimeToSet == StartConfig.setRange.upperBound)
-        #expect(config.blockTimeToStartMin == StartConfig.startRange.lowerBound)
-        #expect(config.blockTimeToStartMax == StartConfig.startRange.upperBound)
-        #expect(config.standingTimeToReady == StartConfig.readyRange.upperBound)
-        #expect(config.standingTimeToStartMin == StartConfig.startRange.lowerBound)
-        #expect(config.standingTimeToStartMax == StartConfig.startRange.upperBound)
+        
+        config[keyPath: property] = range.lowerBound - 1
+        #expect(config[keyPath: property] == range.lowerBound)
+        
+        config[keyPath: property] = range.upperBound + 1
+        #expect(config[keyPath: property] == range.upperBound)
     }
-
+    
     @Test
     func decodingClampsOutOfRangeValues() throws {
         let json = #"{"blockTimeToReady": 50, "blockTimeToSet": -2, "blockTimeToStartMax": 42}"#
