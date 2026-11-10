@@ -42,6 +42,10 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     case monitoringStarted
     case monitoringStopped
     
+    /// The movement detector switched to full speed ahead of the gun.
+    case precisionWindowBegan
+    case precisionWindowEnded
+    
     /// The silent check before the first command passed.
     case audioPrepared(AudioPreflight)
     

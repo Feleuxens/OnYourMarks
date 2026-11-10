@@ -5,6 +5,7 @@
 //  Created by Felix on 23.08.26.
 //
 import Foundation
+import QuartzCore
 import Testing
 @testable import OnYourMarks
 
@@ -78,8 +79,11 @@ class FakeSignalPlayer: SignalPlayer {
         }
     }
     
+    /// Length of the spoken commands.
+    var commandDuration: TimeInterval = 0
+    
     func duration(of signal: Signal) -> TimeInterval {
-        signal == .go ? gunDuration : 0
+        signal == .go ? gunDuration : commandDuration
     }
     
     func logTimingDiagnostics(label: String) {
@@ -226,6 +230,22 @@ final class FakeMovementDetector: MovementDetector {
     
     func stopMonitoring() {
         stopCount += 1
+    }
+    
+    /// When each precision window began, on the host clock.
+    private(set) var precisionBegins: [TimeInterval] = []
+    private(set) var precisionEndCount = 0
+    
+    var isInPrecisionWindow: Bool {
+        precisionBegins.count > precisionEndCount
+    }
+    
+    func beginPrecisionWindow() {
+        precisionBegins.append(CACurrentMediaTime())
+    }
+    
+    func endPrecisionWindow() {
+        precisionEndCount += 1
     }
     
     func emitMovement(at time: TimeInterval) {

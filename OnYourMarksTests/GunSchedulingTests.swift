@@ -167,6 +167,76 @@ struct GunSchedulingTests {
         #expect(!eventKinds(engine).contains { $0.isGunScheduled })
     }
     
+    // MARK: - Precision window
+    
+    @Test
+    func precisionWindowBeginsOneSecondBeforeTheGun() async throws {
+        let (engine, player, detector, config) = makeEngine(holdTime: 1.6)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        // Monitoring runs from the start of the hold, the window opens later.
+        #expect(detector.startCount == 1)
+        #expect(!detector.isInPrecisionWindow)
+        
+        await waitUntil { detector.isInPrecisionWindow }
+        
+        let began = try #require(detector.precisionBegins.first)
+        let gun = try #require(player.pendingSchedule?.renderStart.seconds)
+        #expect(abs(gun - began - StarterEngine.precisionLead) < 0.1)
+        
+        engine.abort()
+        #expect(!detector.isInPrecisionWindow)
+    }
+    
+    @Test(arguments: [StartType.block, .standing])
+    func shortHoldOpensTheWindowDuringTheCommandBefore(startType: StartType) async throws {
+        let player = FakeSignalPlayer()
+        player.commandDuration = 1.2
+        let (engine, _, detector, _) = makeEngine(holdTime: 0, player: player)
+        
+        var config = StartConfig.instant
+        config.startType = startType
+        config.standingTimeToReady = 0
+        config.blockTimeToStartMin = 0.3
+        config.blockTimeToStartMax = 0.3
+        config.standingTimeToStartMin = 0.3
+        config.standingTimeToStartMax = 0.3
+        
+        engine.start(config: config)
+        await waitUntil(timeout: .seconds(4)) { detector.isInPrecisionWindow }
+        
+        // Still in the last command: the hold alone is shorter than the lead.
+        #expect(engine.state == (startType == .block ? .set : .onYourMarks))
+        #expect(detector.startCount == 0)
+        
+        await waitUntil(timeout: .seconds(4)) { engine.state == .waitForStart }
+        
+        let began = try #require(detector.precisionBegins.first)
+        let gun = try #require(player.pendingSchedule?.renderStart.seconds)
+        #expect(abs(gun - began - StarterEngine.precisionLead) < 0.1)
+        #expect(detector.precisionBegins.count == 1)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func precisionWindowEndsWithTheRun() async throws {
+        let (engine, _, detector, config) = makeEngine(holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { !engine.isRunning }
+        
+        #expect(detector.precisionBegins.count == 1)
+        #expect(detector.precisionEndCount == 1)
+        
+        let kinds = eventKinds(engine)
+        let began = try #require(kinds.firstIndex(of: .precisionWindowBegan))
+        let ended = try #require(kinds.firstIndex(of: .precisionWindowEnded))
+        #expect(began < ended)
+    }
+    
     // MARK: - Preflight
     
     @Test

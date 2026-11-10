@@ -10,7 +10,8 @@ import AVFoundation
 import Vision
 
 struct CameraPreview: UIViewRepresentable {
-    let detector: CameraMovementDetector
+    let camera: CameraController
+    let detector: PoseMotionDetector
 
     func makeCoordinator() -> Coordinator {
         Coordinator(detector: detector)
@@ -18,7 +19,7 @@ struct CameraPreview: UIViewRepresentable {
     
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
-        v.videoPreviewLayer.session = detector.session
+        v.videoPreviewLayer.session = camera.session
         v.videoPreviewLayer.videoGravity = .resizeAspectFill
         detector.onJoints = { [weak v] joints in v?.joints = joints }
         return v
@@ -31,8 +32,8 @@ struct CameraPreview: UIViewRepresentable {
     }
     
     final class Coordinator {
-        let detector: CameraMovementDetector
-        init(detector: CameraMovementDetector) { self.detector = detector }
+        let detector: PoseMotionDetector
+        init(detector: PoseMotionDetector) { self.detector = detector }
     }
 
     final class PreviewView: UIView {

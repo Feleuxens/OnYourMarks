@@ -29,7 +29,8 @@ class StarterViewModel {
     private let calibrationStore: CalibrationStore
     private let player: AudioSessionPlayer
     
-    let cameraDetector: CameraMovementDetector
+    let camera: CameraController
+    let motionDetector: PoseMotionDetector
     let engine: StarterEngine
     
     var currentSession: StartSession? {
@@ -97,7 +98,7 @@ class StarterViewModel {
     init(
         configStore: ConfigStore? = nil,
         calibrationStore: CalibrationStore? = nil,
-        cameraDetector: CameraMovementDetector? = nil,
+        camera: CameraController? = nil,
         player: AudioSessionPlayer? = nil,
         musicResumeDelay: Duration = .seconds(2)
     ) {
@@ -117,9 +118,11 @@ class StarterViewModel {
         self.player = player
         self.musicResumeDelay = musicResumeDelay
         
-        let cameraDetector = cameraDetector ?? CameraMovementDetector()
-        self.cameraDetector = cameraDetector
-        self.engine = StarterEngine(player: player, movementDetector: cameraDetector)
+        let camera = camera ?? CameraController()
+        let motionDetector = PoseMotionDetector(camera: camera)
+        self.camera = camera
+        self.motionDetector = motionDetector
+        self.engine = StarterEngine(player: player, movementDetector: motionDetector)
         
         engine.onRunEnded = { [weak self] in
             self?.runEnded()
@@ -277,11 +280,11 @@ class StarterViewModel {
             }
             cameraPermissionDenied = false
             
-            guard cameraDetector.configureIfNeeded() else {
+            guard camera.configureIfNeeded() else {
                 errorMessage = String(localized: "The camera could not be configured.")
                 return
             }
-            cameraDetector.startSession()
+            camera.start()
             cameraEnabled = true
         }
     }
@@ -297,8 +300,8 @@ class StarterViewModel {
         cameraEnableTask = nil
         
         cameraEnabled = false
-        cameraDetector.stopMonitoring()
-        cameraDetector.stopSession()
+        motionDetector.stopMonitoring()
+        camera.stop()
     }
     
     /// App was closed or the screen was locked.

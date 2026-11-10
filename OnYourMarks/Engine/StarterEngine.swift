@@ -55,6 +55,11 @@ final class StarterEngine {
     )
     
     private var monitoringActive: Bool = false
+    private var precisionWindowActive = false
+    
+    /// How long before the gun the movement detector goes to full speed.
+    /// The camera needs about 0.2 s to reach its high frame rate.
+    static let precisionLead: TimeInterval = 1
     
     var onRunEnded: (() -> Void)?
     var onError: ((String) -> Void)?
@@ -104,6 +109,7 @@ final class StarterEngine {
         lastReactionEstimate = nil
         lastDecision = nil
         monitoringActive = false
+        precisionWindowActive = false
         
         let profile = config.startType.profile
         let now = clock.now()
@@ -146,6 +152,7 @@ final class StarterEngine {
         
         player.stop()
         stopMovementMonitoring()
+        endPrecisionWindow()
         
         gunTime = nil
         scheduledGun = nil
@@ -166,6 +173,7 @@ final class StarterEngine {
         
         player.stop()
         stopMovementMonitoring()
+        endPrecisionWindow()
         
         gunTime = nil
         scheduledGun = nil
@@ -249,6 +257,7 @@ final class StarterEngine {
                 .legal,
                 .notApplicable:
             stopMovementMonitoring()
+            endPrecisionWindow()
         }
     }
     
@@ -259,6 +268,7 @@ final class StarterEngine {
         
         player.stop()
         stopMovementMonitoring()
+        endPrecisionWindow()
         
         setState(.falseStart)
         
@@ -276,12 +286,14 @@ final class StarterEngine {
     private func runSequence(config: StartConfig) async -> SequenceOutcome {
         let phases = buildSequence(config: config)
         
-        for phase in phases {
+        for (index, phase) in phases.enumerated() {
             guard !Task.isCancelled else {
                 return .cancelled
             }
             
             setState(phase.state)
+            
+            let timeToGun = plannedTimeToGun(after: index, in: phases)
             
             switch phase.state {
             case .preparing:
@@ -295,7 +307,9 @@ final class StarterEngine {
                     return .failed(String(localized: "The start could not be prepared: \(error.localizedDescription)"))
                 }
                 
-                guard !Task.isCancelled, await sleep(until: ready) else { return .cancelled }
+                guard !Task.isCancelled, await wait(until: ready, timeToGunAfterwards: timeToGun) else {
+                    return .cancelled
+                }
                 
             case .waitForStart:
                 startMovementMonitoring()
@@ -314,7 +328,7 @@ final class StarterEngine {
                 // Off the timing path: the gun no longer depends on this task.
                 player.logTimingDiagnostics(label: "Gun scheduled")
                 
-                guard await sleep(until: gun.renderStart) else { return .cancelled }
+                guard await wait(until: gun.renderStart, timeToGunAfterwards: 0) else { return .cancelled }
                 
             case .start:
                 // Already playing from the schedule.
@@ -335,10 +349,10 @@ final class StarterEngine {
                         return .failed(String(localized: "The start signal could not be played."))
                     }
                     
-                    guard await sleep(for: player.duration(of: signal)) else { return .cancelled }
-                } else if let duration = phase.duration {
-                    guard await sleep(for: duration) else { return .cancelled }
                 }
+                
+                let end = MonotonicTimestamp(seconds: clock.now().seconds + plannedDuration(of: phase))
+                guard await wait(until: end, timeToGunAfterwards: timeToGun) else { return .cancelled }
             }
         }
         return .completed
@@ -366,6 +380,33 @@ final class StarterEngine {
         if preflight.isCalibrationMissing {
             logger.notice("Wireless output without calibration: the gun time is only an estimate")
         }
+    }
+    
+    private func plannedDuration(of phase: Phase) -> TimeInterval {
+        phase.duration ?? phase.signal.map(player.duration(of:)) ?? 0
+    }
+    
+    /// How long the phases between the given one and the gun are planned to take.
+    private func plannedTimeToGun(after index: Int, in phases: [Phase]) -> TimeInterval {
+        phases[(index + 1)...]
+            .prefix { $0.state != .start }
+            .reduce(0) { $0 + plannedDuration(of: $1) }
+    }
+    
+    /// Sleeps until the deadline and, if the precision window begins before
+    /// it, opens the window on the way. False if cancelled.
+    ///
+    /// The window is placed by the time left to the gun, not by a phase, so
+    /// it works the same for every start type and however short the hold is.
+    private func wait(until deadline: MonotonicTimestamp, timeToGunAfterwards: TimeInterval) async -> Bool {
+        let windowStart = MonotonicTimestamp(seconds: deadline.seconds + timeToGunAfterwards - Self.precisionLead)
+        
+        if windowStart <= deadline {
+            guard await sleep(until: windowStart) else { return false }
+            beginPrecisionWindow()
+        }
+        
+        return await sleep(until: deadline)
     }
     
     /// False if cancelled.
@@ -457,6 +498,24 @@ final class StarterEngine {
         monitoringActive = false
         
         record(.monitoringStopped, source: .system)
+    }
+
+    private func beginPrecisionWindow() {
+        guard !precisionWindowActive else { return }
+        
+        movementDetector.beginPrecisionWindow()
+        precisionWindowActive = true
+        
+        record(.precisionWindowBegan, source: .system)
+    }
+    
+    private func endPrecisionWindow() {
+        guard precisionWindowActive else { return }
+        
+        movementDetector.endPrecisionWindow()
+        precisionWindowActive = false
+        
+        record(.precisionWindowEnded, source: .system)
     }
 
     private func record(

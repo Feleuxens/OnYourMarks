@@ -28,7 +28,7 @@ struct StarterView: View {
                     Spacer()
                     Group {
                         if vm.cameraEnabled {
-                            CameraPreview(detector: vm.cameraDetector)
+                            CameraPreview(camera: vm.camera, detector: vm.motionDetector)
                                 .aspectRatio(3/4, contentMode: .fit)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         } else {
