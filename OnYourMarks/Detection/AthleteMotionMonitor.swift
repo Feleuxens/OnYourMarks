@@ -63,7 +63,7 @@ nonisolated struct AthleteMotionMonitor: Sendable {
             }
 
             // An unseen athlete still has the old pose; it says nothing new.
-            guard athlete.isVisible, motion[athlete.id]?.process(athlete.pose.joints) == true else { continue }
+            guard athlete.isVisible, motion[athlete.id]?.process(athlete.pose.joints, aspectRatio: athlete.pose.aspectRatio) == true else { continue }
 
             update.movements.append(
                 MovementObservation(time: time, athleteID: athlete.id, quality: athlete.quality)

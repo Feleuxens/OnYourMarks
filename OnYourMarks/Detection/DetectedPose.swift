@@ -26,6 +26,17 @@ nonisolated struct DetectedPose: Equatable, Sendable {
     /// Mean confidence of those joints.
     let confidence: Float
 
+    /// Width of the picture divided by its height. The normalized
+    /// coordinates stretch the shorter side, so lengths have to be
+    /// corrected by this before they are compared across directions.
+    let aspectRatio: CGFloat
+
+    init(joints: Joints, confidence: Float, aspectRatio: CGFloat = 1) {
+        self.joints = joints
+        self.confidence = confidence
+        self.aspectRatio = aspectRatio
+    }
+
     /// The middle of the torso, or of all joints if no torso joint was found.
     var center: CGPoint {
         let torso = Self.torsoJoints.compactMap { joints[$0] }

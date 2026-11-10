@@ -32,16 +32,24 @@ nonisolated final class PoseTracker: @unchecked Sendable {
             return []
         }
 
+        // Vision sees the picture upright, turned from the buffer's landscape.
+        let aspectRatio = CGFloat(CVPixelBufferGetHeight(frame.pixelBuffer))
+            / CGFloat(max(CVPixelBufferGetWidth(frame.pixelBuffer), 1))
+
         return observations.compactMap { observation in
             guard let points = try? observation.recognizedPoints(.all) else { return nil }
-            return Self.pose(from: points.mapValues { (location: $0.location, confidence: $0.confidence) })
+            return Self.pose(
+                from: points.mapValues { (location: $0.location, confidence: $0.confidence) },
+                aspectRatio: aspectRatio
+            )
         }
     }
 
     /// Keeps the joints of interest that are confident enough.
     /// Nil if none is left.
     static func pose(
-        from points: [VNHumanBodyPoseObservation.JointName: (location: CGPoint, confidence: Float)]
+        from points: [VNHumanBodyPoseObservation.JointName: (location: CGPoint, confidence: Float)],
+        aspectRatio: CGFloat = 1
     ) -> DetectedPose? {
         var joints: DetectedPose.Joints = [:]
         var confidenceSum: Float = 0
@@ -55,6 +63,6 @@ nonisolated final class PoseTracker: @unchecked Sendable {
 
         guard !joints.isEmpty else { return nil }
 
-        return DetectedPose(joints: joints, confidence: confidenceSum / Float(joints.count))
+        return DetectedPose(joints: joints, confidence: confidenceSum / Float(joints.count), aspectRatio: aspectRatio)
     }
 }

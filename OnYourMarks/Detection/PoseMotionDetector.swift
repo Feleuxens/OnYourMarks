@@ -94,12 +94,24 @@ final class PoseMotionDetector: MovementDetector {
 }
 
 nonisolated struct MotionState {
+    typealias Joints = [VNHumanBodyPoseObservation.JointName: CGPoint]
+    
     static let baselineFrameCount = 8
-    static let movementThreshold: CGFloat = 0.05
+    
+    /// How far a joint has to move from its resting place, in torso
+    /// lengths. Measuring in the athlete's own size instead of in the
+    /// picture makes the same real movement count the same for an athlete
+    /// near the camera and one further away. About 15 cm for an adult;
+    /// reasoned, not yet confirmed in the field.
+    static let movementThreshold: CGFloat = 0.3
+    
+    /// Smallest body scale, as a share of the picture's height. Keeps a
+    /// degenerate baseline from turning joint noise into movement.
+    static let minimumBodyScale: CGFloat = 0.02
     
     private var isMonitoring = false
     private var hasTriggered = false
-    private var baseline: [VNHumanBodyPoseObservation.JointName: CGPoint]?
+    private var baseline: Joints?
     private var baselineFrames = 0
     
     mutating func reset(monitoring: Bool) {
@@ -110,7 +122,8 @@ nonisolated struct MotionState {
     }
     
     mutating func process(
-        _ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+        _ joints: Joints,
+        aspectRatio: CGFloat = 1
     ) -> Bool {
         guard isMonitoring, !hasTriggered, !joints.isEmpty else {
             return false
@@ -124,14 +137,16 @@ nonisolated struct MotionState {
         
         guard let baseline else { return false }
         
+        let scale = Self.bodyScale(of: baseline, aspectRatio: aspectRatio)
+        
         var maxDisplacement: CGFloat = 0
         for (joint, position) in joints {
             if let base = baseline[joint] {
-                maxDisplacement = max(maxDisplacement, hypot(position.x - base.x, position.y - base.y))
+                maxDisplacement = max(maxDisplacement, Self.distance(position, base, aspectRatio: aspectRatio))
             }
         }
         
-        guard maxDisplacement > Self.movementThreshold else {
+        guard maxDisplacement / scale > Self.movementThreshold else {
             return false
         }
         
@@ -139,8 +154,34 @@ nonisolated struct MotionState {
         return true
     }
     
+    /// The athlete's size in the picture: the length of the torso, the most
+    /// rigid part of the body. Without neck and root, a shoulder to its hip;
+    /// without those, the box around all joints.
+    static func bodyScale(of joints: Joints, aspectRatio: CGFloat) -> CGFloat {
+        let segments: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
+            (.neck, .root), (.leftShoulder, .leftHip), (.rightShoulder, .rightHip)
+        ]
+        
+        for (upper, lower) in segments {
+            if let a = joints[upper], let b = joints[lower] {
+                return max(distance(a, b, aspectRatio: aspectRatio), minimumBodyScale)
+            }
+        }
+        
+        let xs = joints.values.map { $0.x * aspectRatio }
+        let ys = joints.values.map { $0.y }
+        let width = (xs.max() ?? 0) - (xs.min() ?? 0)
+        let height = (ys.max() ?? 0) - (ys.min() ?? 0)
+        return max(hypot(width, height), minimumBodyScale)
+    }
+    
+    /// In picture heights, so that a length counts the same in every direction.
+    private static func distance(_ a: CGPoint, _ b: CGPoint, aspectRatio: CGFloat) -> CGFloat {
+        hypot((a.x - b.x) * aspectRatio, a.y - b.y)
+    }
+    
     private mutating func mergeBaseline(
-        _ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+        _ joints: Joints
     ) {
         guard baseline != nil else {
             baseline = joints
