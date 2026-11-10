@@ -7,20 +7,27 @@ import Foundation
 import Synchronization
 import Vision
 
-/// Detects the athlete's first movement from the poses in the camera's frames.
+/// Follows the athletes in the camera's frames and detects each one's
+/// first movement.
 final class PoseMotionDetector: MovementDetector {
-    /// Every detected pose, for the preview overlay.
-    var onJoints: ((PoseTracker.Joints) -> Void)?
+    /// Every athlete after each analysed frame, for the preview overlay.
+    var onAthletes: (([TrackedAthlete]) -> Void)?
 
-    /// Called once per monitoring with the capture time of the frame that
-    /// showed the movement, on the host clock.
-    var onMovement: ((TimeInterval) -> Void)?
+    var onMovement: ((MovementObservation) -> Void)?
+    var onTrackingChange: ((AthleteTrackingChange) -> Void)?
 
     private(set) var isMonitoring = false
 
     private let camera: CameraController
-    private nonisolated let tracker = PoseTracker()
-    private nonisolated let motionState = Mutex(MotionState())
+    private nonisolated let poseTracker = PoseTracker()
+    private nonisolated let tracking = Mutex(Tracking())
+
+    /// Shared between the capture queue and the main actor.
+    private nonisolated struct Tracking {
+        var tracker = AthleteTracker()
+        var monitor = AthleteMotionMonitor()
+        var athletes: [TrackedAthlete] = []
+    }
 
     init(camera: CameraController) {
         self.camera = camera
@@ -30,14 +37,32 @@ final class PoseMotionDetector: MovementDetector {
         }
     }
 
-    func startMonitoring() {
-        motionState.withLock { $0.reset(monitoring: true) }
+    @discardableResult
+    func startMonitoring() -> AthleteRoster {
         isMonitoring = true
+
+        return tracking.withLock {
+            let roster = $0.monitor.begin(with: $0.athletes)
+            $0.tracker.retained = Set(roster.entries.map { $0.id })
+            return roster
+        }
     }
 
     func stopMonitoring() {
-        motionState.withLock { $0.reset(monitoring: false) }
+        tracking.withLock {
+            $0.monitor.end()
+            $0.tracker.retained = []
+        }
         isMonitoring = false
+    }
+
+    /// Forgets the athletes; the next ones in view get new IDs.
+    func reset() {
+        stopMonitoring()
+        tracking.withLock {
+            $0.tracker.reset()
+            $0.athletes = []
+        }
     }
 
     func beginPrecisionWindow() {
@@ -50,20 +75,20 @@ final class PoseMotionDetector: MovementDetector {
 
     /// Runs on the capture queue.
     private nonisolated func process(_ frame: CameraFrame) {
-        guard let joints = tracker.joints(in: frame) else { return }
+        let poses = poseTracker.poses(in: frame)
 
-        Task { @MainActor [weak self] in
-            self?.onJoints?(joints)
+        let (athletes, update) = tracking.withLock {
+            let athletes = $0.tracker.update(with: poses, at: frame.timestamp)
+            $0.athletes = athletes
+            return (athletes, $0.monitor.process(athletes, at: frame.timestamp))
         }
 
-        let movementDetected = motionState.withLock { $0.process(joints) }
-
-        guard movementDetected else { return }
-
-        let frameTime = frame.timestamp.seconds
-
         Task { @MainActor [weak self] in
-            self?.onMovement?(frameTime)
+            guard let self else { return }
+
+            onAthletes?(athletes)
+            update.trackingChanges.forEach { onTrackingChange?($0) }
+            update.movements.forEach { onMovement?($0) }
         }
     }
 }

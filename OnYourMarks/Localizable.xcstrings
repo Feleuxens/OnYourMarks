@@ -184,6 +184,36 @@
         }
       }
     },
+    "False start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlstart"
+          }
+        }
+      }
+    },
+    "False start: athlete %lld from the left" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlstart: Athlet %lld von links"
+          }
+        }
+      }
+    },
+    "False start: athletes %@ from the left" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlstart: Athleten %@ von links"
+          }
+        }
+      }
+    },
     "iPhone speaker" : {
       "localizations" : {
         "de" : {

@@ -26,6 +26,12 @@ final class StarterEngine {
     private(set) var lastReactionEstimate: DurationEstimate?
     private(set) var lastDecision: StartDecision?
     
+    /// The athletes of the current or last start, fixed when monitoring began.
+    private(set) var roster: AthleteRoster?
+    
+    /// One entry per athlete that moved, in the order they moved.
+    private(set) var athleteResults: [AthleteStartResult] = []
+    
     private(set) var currentSession: StartSession?
     private(set) var lastSession: StartSession?
     
@@ -53,6 +59,16 @@ final class StarterEngine {
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
         category: "Engine"
     )
+    
+    /// When the first false start of this run was seen. Until the
+    /// collection ends, further athletes can still be found at fault.
+    private var firstFalseStart: MonotonicTimestamp?
+    
+    /// How long after a false start movements are still taken in: the
+    /// window in which another athlete's movement counts as independent,
+    /// plus the time a frame needs from capture through pose detection to
+    /// the engine (capture to delivery is tested to stay under 0.25 s).
+    static let falseStartCollection: TimeInterval = DecisionEngine.independentMovementWindow + 0.25
     
     private var monitoringActive: Bool = false
     private var precisionWindowActive = false
@@ -93,8 +109,12 @@ final class StarterEngine {
         self.clock = clock
         self.decisionEngine = decisionEngine
         
-        self.movementDetector.onMovement = { [weak self] moveTime in
-            self?.handleMovement(at: moveTime)
+        self.movementDetector.onMovement = { [weak self] observation in
+            self?.handleMovement(observation)
+        }
+        
+        self.movementDetector.onTrackingChange = { [weak self] change in
+            self?.handleTrackingChange(change)
         }
     }
     
@@ -108,6 +128,9 @@ final class StarterEngine {
         lastReactionTime = nil
         lastReactionEstimate = nil
         lastDecision = nil
+        roster = nil
+        athleteResults = []
+        firstFalseStart = nil
         monitoringActive = false
         precisionWindowActive = false
         
@@ -186,36 +209,63 @@ final class StarterEngine {
     }
     
     private func handleMovement(
-        at rawMoveTime: TimeInterval
+        _ observation: MovementObservation
     ) {
-        guard state == .waitForStart || state == .start else { return }
+        let athleteID = observation.athleteID
+        
+        if state == .falseStart {
+            // Others may have false-started too; only a detector that tells
+            // athletes apart can say so.
+            guard monitoringActive, athleteID != nil, let firstFalseStart else { return }
+            
+            // Without a gun to measure against, only a movement too close
+            // to the first one to be a reaction to it is judged.
+            guard gunTime != nil
+                    || decisionEngine.isIndependentFalseStart(at: observation.time, afterFalseStartAt: firstFalseStart) else {
+                return
+            }
+        } else {
+            guard state == .waitForStart || state == .start else { return }
+        }
         
         guard let profile = currentSession?.profile else { return }
         
+        // Only athletes on the roster are judged, and each only once. A
+        // report can still arrive from a frame analysed before monitoring ended.
+        if let athleteID {
+            guard roster?.contains(athleteID) == true,
+                  !athleteResults.contains(where: { $0.athleteID == athleteID }) else {
+                return
+            }
+        }
+        
+        let position = athleteID.flatMap { roster?.position(of: $0) }
+        
         // For now movementTime comes from CMSampleBuffer timestamp
         // Todo for later will map capture timestamps
-        let movementTime = TimeEstimate.exact(MonotonicTimestamp(seconds: rawMoveTime))
+        let movementTime = TimeEstimate.exact(observation.time)
         
         record(
-            .movementObserved,
+            .movementObserved(observation.quality),
             at: movementTime,
-            source: .cameraLocal
+            source: .cameraLocal,
+            athleteID: athleteID
         )
         
         guard let gunTime else {
-            let decision = StartDecision.definiteFalseStart
+            let decision = decisionEngine.evaluateMovementBeforeGun(trackingQuality: observation.quality)
             
-            logger.info("Movement before the gun: false start")
-            
-            lastDecision = decision
-            
-            record(
-                .decision(decision),
-                at: movementTime,
-                source: .system
+            logger.info(
+                """
+                Movement before the gun\(Self.description(position: position), privacy: .public): \
+                \(String(describing: decision), privacy: .public)
+                """
             )
             
-            triggerFalseStart()
+            conclude(
+                AthleteStartResult(athleteID: athleteID, position: position, reaction: nil, decision: decision),
+                at: movementTime
+            )
             return
         }
         
@@ -227,38 +277,88 @@ final class StarterEngine {
         record(
             .reactionMeasured(reaction),
             at: movementTime,
-            source: .cameraLocal
+            source: .cameraLocal,
+            athleteID: athleteID
         )
         
-        let decision = decisionEngine.evaluateReaction(reaction, profile: profile)
-        
-        lastDecision = decision
+        let decision = decisionEngine.qualify(
+            decisionEngine.evaluateReaction(reaction, profile: profile),
+            by: observation.quality
+        )
         
         logger.info(
             """
-            Reaction \(reaction.best * 1000, format: .fixed(precision: 1)) ms \
+            Reaction\(Self.description(position: position), privacy: .public) \
+            \(reaction.best * 1000, format: .fixed(precision: 1)) ms \
             (\(reaction.earliest * 1000, format: .fixed(precision: 1)) to \
             \(reaction.latest * 1000, format: .fixed(precision: 1)) ms): \
             \(String(describing: decision), privacy: .public)
             """
         )
         
+        conclude(
+            AthleteStartResult(athleteID: athleteID, position: position, reaction: reaction, decision: decision),
+            at: movementTime
+        )
+    }
+    
+    /// Stores one athlete's result and acts on it: a false start recalls the
+    /// field, anything else lets the others go on being watched.
+    private func conclude(_ result: AthleteStartResult, at time: TimeEstimate) {
+        athleteResults.append(result)
+        
+        // A legal reaction that comes in after a false start doesn't replace it.
+        if lastDecision != .definiteFalseStart {
+            lastDecision = result.decision
+        }
+        
+        if result.decision == .definiteFalseStart, firstFalseStart == nil {
+            firstFalseStart = time.best
+        }
+        
         record(
-            .decision(decision),
-            at: movementTime,
-            source: .system
+            .decision(result.decision),
+            at: time,
+            source: .system,
+            athleteID: result.athleteID
         )
         
-        switch decision {
+        switch result.decision {
         case .definiteFalseStart:
             triggerFalseStart()
             
         case .uncertain,
                 .legal,
                 .notApplicable:
+            guard everyAthleteHasMoved(after: result) else { return }
+            
             stopMovementMonitoring()
             endPrecisionWindow()
         }
+    }
+    
+    /// A detector that doesn't tell athletes apart reports one movement only.
+    private func everyAthleteHasMoved(after result: AthleteStartResult) -> Bool {
+        guard result.athleteID != nil, let roster else { return true }
+        
+        return roster.entries.allSatisfy { entry in
+            athleteResults.contains { $0.athleteID == entry.id }
+        }
+    }
+    
+    private func handleTrackingChange(_ change: AthleteTrackingChange) {
+        guard monitoringActive, roster?.contains(change.athleteID) == true else { return }
+        
+        record(
+            .athleteTrackingChanged(change.state),
+            at: .exact(change.time),
+            source: .cameraLocal,
+            athleteID: change.athleteID
+        )
+    }
+    
+    private static func description(position: Int?) -> String {
+        position.map { " of athlete \($0) from the left" } ?? ""
     }
     
     private func triggerFalseStart() {
@@ -267,17 +367,19 @@ final class StarterEngine {
         sequenceTask?.cancel()
         
         player.stop()
-        stopMovementMonitoring()
-        endPrecisionWindow()
         
         setState(.falseStart)
+        
+        // Monitoring goes on: other athletes may have false-started as well,
+        // and their frames are still on the way. finishRun() ends it.
+        let collectUntil = MonotonicTimestamp(seconds: clock.now().seconds + Self.falseStartCollection)
         
         sequenceTask = Task { [weak self] in
             guard let self else { return }
             
             await self.player.playRecall(times: Self.recallShots, gap: Self.recallGap)
             
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, await self.sleep(until: collectUntil) else { return }
             
             self.finishRun(outcome: .falseStart)
         }
@@ -483,10 +585,14 @@ final class StarterEngine {
             return
         }
         
-        movementDetector.startMonitoring()
+        let roster = movementDetector.startMonitoring()
+        self.roster = roster
         monitoringActive = true
         
         record(.monitoringStarted, source: .system)
+        record(.rosterEstablished(roster), source: .cameraLocal)
+        
+        logger.info("Roster: \(roster.entries.count) athletes")
     }
     
     private func stopMovementMonitoring() {

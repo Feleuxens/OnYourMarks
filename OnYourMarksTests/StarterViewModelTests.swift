@@ -5,6 +5,7 @@
 
 import Testing
 import Foundation
+import QuartzCore
 @testable import OnYourMarks
 
 @MainActor
@@ -539,5 +540,25 @@ struct StarterViewModelTests {
         vm.config.audioOutput = .iPhoneSpeaker
         
         #expect(!vm.canCalibrateOutput)
+    }
+
+    @Test
+    @MainActor
+    func falseStartIsExposedUntilTheNextStart() async {
+        let vm = makeViewModel(player: FakeSessionPlayer(), timeToStart: 10)
+        #expect(vm.falseStarts.isEmpty)
+
+        vm.start()
+        await waitUntil { vm.engine.state == .waitForStart }
+
+        vm.motionDetector.onMovement?(MovementObservation(time: MonotonicTimestamp(seconds: CACurrentMediaTime())))
+        await waitUntil { !vm.isRunning }
+
+        #expect(vm.falseStarts.map { $0.decision } == [.definiteFalseStart])
+        #expect(vm.falseStarts.first?.position == nil)
+
+        vm.start()
+        #expect(vm.falseStarts.isEmpty)
+        vm.abort()
     }
 }

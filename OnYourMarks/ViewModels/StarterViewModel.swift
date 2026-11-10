@@ -95,6 +95,12 @@ class StarterViewModel {
         engine.isRunning
     }
     
+    /// The false starts of the current or last start, in the order they
+    /// happened, with the athletes if the detector could tell them apart.
+    var falseStarts: [AthleteStartResult] {
+        engine.athleteResults.filter { $0.decision == .definiteFalseStart }
+    }
+    
     init(
         configStore: ConfigStore? = nil,
         calibrationStore: CalibrationStore? = nil,
@@ -300,7 +306,7 @@ class StarterViewModel {
         cameraEnableTask = nil
         
         cameraEnabled = false
-        motionDetector.stopMonitoring()
+        motionDetector.reset()
         camera.stop()
     }
     

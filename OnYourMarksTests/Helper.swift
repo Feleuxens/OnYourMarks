@@ -219,13 +219,19 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
 }
 
 final class FakeMovementDetector: MovementDetector {
-    var onMovement: ((TimeInterval) -> Void)?
+    var onMovement: ((MovementObservation) -> Void)?
+    var onTrackingChange: ((AthleteTrackingChange) -> Void)?
+    
+    /// Returned as the roster of each monitoring.
+    var roster = AthleteRoster.empty
     
     private(set) var startCount = 0
     private(set) var stopCount = 0
     
-    func startMonitoring() {
+    @discardableResult
+    func startMonitoring() -> AthleteRoster {
         startCount += 1
+        return roster
     }
     
     func stopMonitoring() {
@@ -248,8 +254,20 @@ final class FakeMovementDetector: MovementDetector {
         precisionEndCount += 1
     }
     
-    func emitMovement(at time: TimeInterval) {
-        onMovement?(time)
+    func emitMovement(
+        at time: TimeInterval,
+        athlete: AthleteID? = nil,
+        quality: TrackingQuality? = nil
+    ) {
+        onMovement?(
+            MovementObservation(time: MonotonicTimestamp(seconds: time), athleteID: athlete, quality: quality)
+        )
+    }
+    
+    func emitTrackingChange(_ state: AthleteTrackState, athlete: AthleteID, at time: TimeInterval) {
+        onTrackingChange?(
+            AthleteTrackingChange(athleteID: athlete, state: state, time: MonotonicTimestamp(seconds: time))
+        )
     }
 }
 

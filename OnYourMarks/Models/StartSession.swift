@@ -57,7 +57,15 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     /// the event time is when it was heard.
     case gunPlaybackMeasured
     
-    case movementObserved
+    /// The athletes found when monitoring began; only they are judged.
+    case rosterEstablished(AthleteRoster)
+    
+    /// An athlete on the roster was hidden, lost or found again.
+    case athleteTrackingChanged(AthleteTrackState)
+    
+    /// With how well the athlete was tracked in the frame that showed it,
+    /// if the detector knows.
+    case movementObserved(TrackingQuality?)
     
     case reactionMeasured(DurationEstimate)
     

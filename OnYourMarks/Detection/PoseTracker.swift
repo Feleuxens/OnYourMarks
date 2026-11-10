@@ -5,12 +5,10 @@
 
 import Vision
 
-/// Finds the athlete's joints in a frame.
+/// Finds the bodies in a frame and their joints.
 ///
 /// Not thread-safe: use it from one queue only, here the capture queue.
 nonisolated final class PoseTracker: @unchecked Sendable {
-    typealias Joints = [VNHumanBodyPoseObservation.JointName: CGPoint]
-
     static let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] = [
         .root, .neck,
         .leftHip, .rightHip,
@@ -25,23 +23,38 @@ nonisolated final class PoseTracker: @unchecked Sendable {
 
     private let request = VNDetectHumanBodyPoseRequest()
 
-    /// The confidently detected joints, or nil if no body was found.
-    func joints(in frame: CameraFrame) -> Joints? {
+    /// Every body with at least one confidently detected joint.
+    /// Empty if none was found.
+    func poses(in frame: CameraFrame) -> [DetectedPose] {
         let handler = VNImageRequestHandler(cvPixelBuffer: frame.pixelBuffer, orientation: .right)
 
-        guard (try? handler.perform([request])) != nil,
-              let observation = request.results?.first,
-              let points = try? observation.recognizedPoints(.all) else {
-            return nil
+        guard (try? handler.perform([request])) != nil, let observations = request.results else {
+            return []
         }
 
-        var joints: Joints = [:]
+        return observations.compactMap { observation in
+            guard let points = try? observation.recognizedPoints(.all) else { return nil }
+            return Self.pose(from: points.mapValues { (location: $0.location, confidence: $0.confidence) })
+        }
+    }
 
-        for joint in Self.jointsOfInterest {
-            if let point = points[joint], point.confidence >= Self.minimumConfidence {
+    /// Keeps the joints of interest that are confident enough.
+    /// Nil if none is left.
+    static func pose(
+        from points: [VNHumanBodyPoseObservation.JointName: (location: CGPoint, confidence: Float)]
+    ) -> DetectedPose? {
+        var joints: DetectedPose.Joints = [:]
+        var confidenceSum: Float = 0
+
+        for joint in jointsOfInterest {
+            if let point = points[joint], point.confidence >= minimumConfidence {
                 joints[joint] = point.location
+                confidenceSum += point.confidence
             }
         }
-        return joints
+
+        guard !joints.isEmpty else { return nil }
+
+        return DetectedPose(joints: joints, confidence: confidenceSum / Float(joints.count))
     }
 }

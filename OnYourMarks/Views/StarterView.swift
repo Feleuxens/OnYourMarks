@@ -28,7 +28,12 @@ struct StarterView: View {
                     Spacer()
                     Group {
                         if vm.cameraEnabled {
-                            CameraPreview(camera: vm.camera, detector: vm.motionDetector)
+                            CameraPreview(
+                                camera: vm.camera,
+                                detector: vm.motionDetector,
+                                roster: vm.engine.roster,
+                                falseStarters: Set(vm.falseStarts.compactMap { $0.athleteID })
+                            )
                                 .aspectRatio(3/4, contentMode: .fit)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         } else {
@@ -37,6 +42,12 @@ struct StarterView: View {
                     }
                     .aspectRatio(3/4, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(alignment: .top) {
+                        if !vm.falseStarts.isEmpty {
+                            FalseStartBanner(positions: vm.falseStarts.compactMap { $0.position }.sorted())
+                                .padding(.top, 8)
+                        }
+                    }
                     .overlay(alignment: .bottom) {
                         CameraToggleButton(isOn: vm.cameraEnabled) {
                             if vm.cameraEnabled { vm.disableCamera() }

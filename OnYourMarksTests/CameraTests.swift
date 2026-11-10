@@ -234,18 +234,22 @@ struct CameraControllerTests {
         #expect(medianDelay < 0.25)
     }
 
-    /// How many frames per second pose detection keeps up with.
+    /// How many frames per second pose detection and athlete tracking keep up with.
     @Test(.enabled(if: cameraRequested))
     func poseTrackingThroughputInPrecisionMode() async throws {
         let camera = CameraController()
         let tracker = PoseTracker()
+        let athleteTracker = Mutex(AthleteTracker())
         let durations = Mutex<[TimeInterval]>([])
+        let bodyCounts = Mutex<[Int]>([])
 
         camera.setFrameHandler { frame in
             let began = CACurrentMediaTime()
-            _ = tracker.joints(in: frame)
+            let poses = tracker.poses(in: frame)
+            let athletes = athleteTracker.withLock { $0.update(with: poses, at: frame.timestamp) }
             let took = CACurrentMediaTime() - began
             durations.withLock { $0.append(took) }
+            bodyCounts.withLock { $0.append(athletes.count { $0.state == .tracked }) }
         }
 
         try #require(camera.configureIfNeeded())
@@ -255,6 +259,7 @@ struct CameraControllerTests {
         camera.setMode(.precision)
         try await Task.sleep(for: .seconds(1))
         durations.withLock { $0.removeAll() }
+        bodyCounts.withLock { $0.removeAll() }
         _ = camera.currentStatistics()
         camera.setMode(.idle)
         camera.setMode(.precision)
@@ -265,13 +270,16 @@ struct CameraControllerTests {
 
         let sorted = durations.withLock { $0.sorted() }
         let median = try #require(sorted.isEmpty ? nil : sorted[sorted.count / 2])
+        let bodies = bodyCounts.withLock { $0.sorted() }
 
         Attachment.record(
             """
             analysed: \(statistics.deliveredFrameRate ?? 0) fps (\(statistics.delivered) frames)
             dropped: \(statistics.dropped) (\(statistics.droppedLate) late), \
             longest gap \(statistics.longestGap * 1000) ms
-            pose detection: median \(median * 1000) ms, max \((sorted.last ?? 0) * 1000) ms
+            pose detection and tracking: median \(median * 1000) ms, max \((sorted.last ?? 0) * 1000) ms
+            tracked athletes per frame: median \(bodies.isEmpty ? 0 : bodies[bodies.count / 2]), \
+            max \(bodies.last ?? 0)
             pressure: \(camera.pressure)
             """,
             named: "Pose tracking throughput"
