@@ -1,236 +1,609 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "Abort": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abbrechen"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "%@ isn't calibrated, so false-start detection will be inaccurate. Calibrate it in Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ist nicht kalibriert, daher wird die Fehlstarterkennung ungenau. Kalibriere die Ausgabe in den Einstellungen."
           }
         }
       }
     },
-    "Block": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Block"
+    "%lld ms ± %lld ms" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ms ± %lld ms"
           }
         }
       }
     },
-    "Camera access required": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kamerazugriff erforderlich"
+    "A start sound could not be loaded." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Startsignal konnte nicht geladen werden."
           }
         }
       }
     },
-    "Cancel": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abbrechen"
+    "Abort" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen"
           }
         }
       }
     },
-    "Detection off": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Erkennung aus"
+    "Audio output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audioausgabe"
           }
         }
       }
     },
-    "Detection on": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Erkennung an"
+    "Automatic" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisch"
           }
         }
       }
     },
-    "Enable camera access in Settings to use false-start detection.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Erlaube den Kamerazugriff in den Einstellungen, um Fehlstarts zu erkennen."
+    "Block" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block"
           }
         }
       }
     },
-    "Max time until Start": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Max. Zeit bis Start"
+    "Calibrate output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgabe kalibrieren"
           }
         }
       }
     },
-    "Min time until Start": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Min. Zeit bis Start"
+    "Calibrated" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kalibriert"
           }
         }
       }
     },
-    "Ok": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OK"
+    "Calibrating…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kalibriere …"
           }
         }
       }
     },
-    "OnYourMarks Error": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OnYourMarks-Fehler"
+    "Calibration plays the start signal six times and listens with the microphone. Turn the volume up and hold the headphones or speaker next to the iPhone, in a quiet room." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kalibrierung spielt das Startsignal sechsmal ab und hört mit dem Mikrofon zu. Stell die Lautstärke hoch und halte Kopfhörer oder Lautsprecher in einem ruhigen Raum neben das iPhone."
           }
         }
       }
     },
-    "Open Settings": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Einstellungen öffnen"
+    "Camera access required" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamerazugriff erforderlich"
           }
         }
       }
     },
-    "Reset to defaults": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auf Standard zurücksetzen"
+    "Cancel" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen"
           }
         }
       }
     },
-    "Settings": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Einstellungen"
+    "Choose output device" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgabegerät wählen"
           }
         }
       }
     },
-    "Signal": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signal"
+    "Current output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuelle Ausgabe"
           }
         }
       }
     },
-    "Sound": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ton"
+    "Detection off" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkennung aus"
           }
         }
       }
     },
-    "Standing": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hochstart"
+    "Detection on" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkennung an"
           }
         }
       }
     },
-    "Start": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Start"
+    "Enable camera access in Settings to use false-start detection." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaube den Kamerazugriff in den Einstellungen, um Fehlstarts zu erkennen."
           }
         }
       }
     },
-    "Start sequence (block)": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Startsequenz (Block)"
+    "iPhone speaker" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone-Lautsprecher"
           }
         }
       }
     },
-    "Start sequence (standing)": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Startsequenz (Hochstart)"
+    "Latency correction" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Latenzkorrektur"
           }
         }
       }
     },
-    "Time until \"On Your Marks\"": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zeit bis „On Your Marks“"
+    "Max time until Start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max. Zeit bis Start"
           }
         }
       }
     },
-    "Time until \"Set\"": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zeit bis „Set“"
+    "Min time until Start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Min. Zeit bis Start"
           }
         }
       }
     },
-    "s": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "s"
+    "No audio output is available." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es ist keine Audioausgabe verfügbar."
+          }
+        }
+      }
+    },
+    "none" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keine"
+          }
+        }
+      }
+    },
+    "Not calibrated" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht kalibriert"
+          }
+        }
+      }
+    },
+    "Not needed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht nötig"
+          }
+        }
+      }
+    },
+    "Ok" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
+    },
+    "OnYourMarks Error" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OnYourMarks-Fehler"
+          }
+        }
+      }
+    },
+    "Open Settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen öffnen"
+          }
+        }
+      }
+    },
+    "Output" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgabe"
+          }
+        }
+      }
+    },
+    "Remove calibration" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kalibrierung entfernen"
+          }
+        }
+      }
+    },
+    "Reset to defaults" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf Standard zurücksetzen"
+          }
+        }
+      }
+    },
+    "s" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "s"
+          }
+        }
+      }
+    },
+    "Settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen"
+          }
+        }
+      }
+    },
+    "Signal" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signal"
+          }
+        }
+      }
+    },
+    "Sound" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ton"
+          }
+        }
+      }
+    },
+    "Standing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hochstart"
+          }
+        }
+      }
+    },
+    "Start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        }
+      }
+    },
+    "Start sequence (block)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startsequenz (Block)"
+          }
+        }
+      }
+    },
+    "Start sequence (standing)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startsequenz (Hochstart)"
+          }
+        }
+      }
+    },
+    "The audio engine could not be started." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Audiowiedergabe konnte nicht gestartet werden."
+          }
+        }
+      }
+    },
+    "The audio output changed during the calibration. Please try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Audioausgabe hat sich während der Kalibrierung geändert. Bitte versuch es erneut."
+          }
+        }
+      }
+    },
+    "The calibration click could not be played: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Kalibrierungsklick konnte nicht abgespielt werden: %@"
+          }
+        }
+      }
+    },
+    "The camera could not be configured." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera konnte nicht konfiguriert werden."
+          }
+        }
+      }
+    },
+    "The clicks varied by %lld ms. Keep the output still and the room quiet, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Klicks schwankten um %lld ms. Halte die Ausgabe ruhig, sorge für Stille und versuch es erneut."
+          }
+        }
+      }
+    },
+    "The iPhone speaker and calibration need microphone access. You can allow it in Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der iPhone-Lautsprecher und die Kalibrierung brauchen Mikrofonzugriff. Du kannst ihn in den Einstellungen erlauben."
+          }
+        }
+      }
+    },
+    "The iPhone speaker could not be selected; the signals would play on %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der iPhone-Lautsprecher konnte nicht ausgewählt werden; die Signale würden über %@ abgespielt."
+          }
+        }
+      }
+    },
+    "The iPhone speaker reports its latency precisely, so it needs no calibration." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der iPhone-Lautsprecher meldet seine Latenz genau und braucht daher keine Kalibrierung."
+          }
+        }
+      }
+    },
+    "The microphone could not record: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Mikrofon konnte nicht aufnehmen: %@"
+          }
+        }
+      }
+    },
+    "The microphone only heard %lld of %lld needed clicks. Turn the volume up and hold the output close to the iPhone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Mikrofon hat nur %lld von %lld nötigen Klicks gehört. Stell die Lautstärke hoch und halte die Ausgabe näher ans iPhone."
+          }
+        }
+      }
+    },
+    "The start could not be prepared: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start konnte nicht vorbereitet werden: %@"
+          }
+        }
+      }
+    },
+    "The start signal could not be played." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Startsignal konnte nicht abgespielt werden."
+          }
+        }
+      }
+    },
+    "The start was aborted because the audio output changed (now: %@)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start wurde abgebrochen, weil sich die Audioausgabe geändert hat (jetzt: %@)."
+          }
+        }
+      }
+    },
+    "The start was aborted because the audio system was reconfigured." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start wurde abgebrochen, weil das Audiosystem neu konfiguriert wurde."
+          }
+        }
+      }
+    },
+    "The start was aborted because the audio system was reset." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start wurde abgebrochen, weil das Audiosystem zurückgesetzt wurde."
+          }
+        }
+      }
+    },
+    "The start was aborted because the system deactivated audio (e.g. a call or an alarm)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start wurde abgebrochen, weil das System die Audiowiedergabe beendet hat (z. B. durch einen Anruf oder Wecker)."
+          }
+        }
+      }
+    },
+    "The system did not activate the audio session." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das System hat die Audiositzung nicht aktiviert."
+          }
+        }
+      }
+    },
+    "Time until \"On Your Marks\"" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeit bis „On Your Marks“"
+          }
+        }
+      }
+    },
+    "Time until \"Set\"" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeit bis „Set“"
+          }
+        }
+      }
+    },
+    "Unknown" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbekannt"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

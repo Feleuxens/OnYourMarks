@@ -49,14 +49,18 @@ struct StarterView: View {
                     
                     Spacer()
                     
+                    if let output = vm.uncalibratedWirelessOutput {
+                        UncalibratedOutputWarning(outputName: output.name)
+                            .padding(.bottom, 8)
+                    }
+                    
                     StartControls(
                         isRunning: vm.isRunning,
                         onStart: { vm.start() },
                         onAbort: { vm.abort() }
                     )
                     .frame(maxWidth: .infinity)
-    
-                    
+                    .disabled(vm.isCalibrating)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(.chalk)
@@ -69,6 +73,8 @@ struct StarterView: View {
                     } label: {
                         Image(systemName: "gearshape").foregroundStyle(Color.graphite.opacity(0.7))
                     }.disabled(vm.isRunning).opacity(vm.isRunning ? 0.5 : 1).buttonStyle(.plain)
+                    .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("settingsButton")
                 }
             }
             .tint(.chalk)
@@ -108,6 +114,11 @@ struct StarterView: View {
             Text(vm.errorMessage ?? "")
         }
         .onChange(of: scenePhase) { _, newPhase in
+            // Headphones may have connected while the app was away.
+            if newPhase == .active {
+                vm.refreshCurrentOutput()
+            }
+            
             guard newPhase == .background else { return }
             
             vm.handleEnteredBackground()

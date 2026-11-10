@@ -143,7 +143,8 @@ struct AudioControllerTests {
             name: AVAudioSession.mediaServicesWereResetNotification,
             object: AVAudioSession.sharedInstance()
         )
-        await settle()
+        // Delivery to the main actor takes longer on a device than a few yields.
+        await waitUntil { recorder.reasons.count == 1 }
         
         #expect(recorder.reasons.count == 1)
         #expect(!controller.isSessionActive)
@@ -307,6 +308,216 @@ struct AudioControllerTests {
         let controller = AudioController(theme: .eng1)
         
         #expect(controller.schedule(.go, at: now()) == nil)
+    }
+
+    // MARK: - Microphone (needs access: simctl privacy grant, or allow once on a device)
+    
+    private nonisolated static var microphoneGranted: Bool {
+        AVAudioApplication.shared.recordPermission == .granted
+    }
+    
+    /// Opt-in: plays the gun six times at full session volume.
+    private nonisolated static var calibrationRequested: Bool {
+        ProcessInfo.processInfo.environment["RUN_CALIBRATION"] == "1"
+    }
+    
+    @Test(.enabled(if: microphoneGranted))
+    func recorderDeliversTimestampedSamples() async throws {
+        // The speaker setup records, so it activates with microphone input.
+        let controller = AudioController(theme: .eng1)
+        controller.output = .iPhoneSpeaker
+        try await controller.activateSession()
+        
+        let recorder = MicrophoneRecorder()
+        try recorder.start()
+        try await Task.sleep(for: .seconds(0.5))
+        let chunks = recorder.stop()
+        
+        let samples = chunks.reduce(0) { $0 + $1.samples.count }
+        #expect(samples > 0)
+        
+        // Consecutive chunks follow each other on the host clock.
+        for (previous, next) in zip(chunks, chunks.dropFirst()) {
+            let expected = previous.hostSeconds + Double(previous.samples.count) / previous.sampleRate
+            #expect(abs(next.hostSeconds - expected) < 0.005)
+        }
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test(.enabled(if: microphoneGranted && calibrationRequested), arguments: AudioOutput.allCases)
+    func calibrationMeasuresCurrentOutput(output: AudioOutput) async throws {
+        let controller = AudioController(theme: .eng1)
+        controller.output = output
+        
+        do {
+            let calibration = try await controller.calibrateCurrentOutput()
+            Attachment.record(
+                """
+                \(calibration.routeName): \(calibration.correction * 1000) ms ± \(calibration.uncertainty * 1000) ms \
+                from \(calibration.clickCount) clicks
+                """,
+                named: "Calibration \(output)"
+            )
+        } catch CalibrationError.inconsistentClicks(let offsets) {
+            let listed = offsets.map { String(format: "%.1f", $0 * 1000) }.joined(separator: ", ")
+            Issue.record("Calibration on \(output) inconsistent, offsets: \(listed) ms")
+        } catch {
+            Issue.record("Calibration on \(output) failed: \(error.localizedDescription)")
+        }
+        
+        #expect(!controller.isSessionActive)
+    }
+
+    // MARK: - Applying calibrations
+    
+    @Test
+    func scheduledSignalIncludesCalibrationOfCurrentRoute() async throws {
+        let (controller, _) = try await activeController()
+        let route = try #require(controller.currentOutput())
+        let at = MonotonicTimestamp(seconds: now().seconds + 0.3)
+        
+        let uncalibrated = try #require(controller.schedule(.go, at: at))
+        
+        controller.calibrations = [route.id: .fake(routeID: route.id, correction: 0.107, uncertainty: 0.004)]
+        let calibrated = try #require(controller.schedule(.go, at: at))
+        
+        let shift = calibrated.audibleOnset.best.seconds - uncalibrated.audibleOnset.best.seconds
+        #expect(abs(shift - 0.107) < 0.000_001)
+        #expect(abs(calibrated.audibleOnset.latest.seconds - calibrated.audibleOnset.best.seconds - 0.004) < 0.000_001)
+        
+        controller.stop()
+        await controller.deactivateSession()
+    }
+    
+    // MARK: - Preflight
+    
+    @Test
+    func preflightActivatesAndReportsOutputTiming() async throws {
+        let controller = AudioController(theme: .eng1)
+        
+        let preflight = try await controller.prepareForStart()
+        let route = try #require(controller.currentOutput())
+        
+        #expect(controller.isSessionActive)
+        #expect(controller.engine.isRunning)
+        #expect(preflight.sampleRate > 0)
+        #expect(preflight.ioBufferDuration > 0)
+        #expect(preflight.gunTiming.route == route)
+        #expect(preflight.gunTiming.onsetOffset == controller.onsetOffsets[.go])
+        #expect(preflight.gunTiming.calibration == nil)
+        #expect(preflight.gunTiming.uncertainty > 0)
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func preflightAndScheduledGunShareTheCalibration() async throws {
+        let controller = AudioController(theme: .eng1)
+        let route = try #require(controller.currentOutput())
+        let calibration = OutputCalibration.fake(routeID: route.id, correction: 0.107, uncertainty: 0.004)
+        controller.calibrations = [route.id: calibration]
+        
+        let preflight = try await controller.prepareForStart()
+        let gun = try #require(controller.schedule(.go, at: MonotonicTimestamp(seconds: now().seconds + 0.3)))
+        
+        #expect(preflight.gunTiming.calibration == calibration)
+        #expect(preflight.gunTiming.uncertainty == 0.004)
+        #expect(!preflight.isCalibrationMissing)
+        #expect(gun.basis.calibration == calibration)
+        #expect(gun.basis.route == preflight.gunTiming.route)
+        #expect(gun.audibleOnset == gun.basis.audibleOnset(renderStart: gun.renderStart))
+        
+        controller.stop()
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func calibrationOfAnotherRouteIsIgnored() async throws {
+        let (controller, _) = try await activeController()
+        let at = MonotonicTimestamp(seconds: now().seconds + 0.3)
+        
+        let uncalibrated = try #require(controller.schedule(.go, at: at))
+        controller.calibrations = ["some-other-device": .fake(routeID: "some-other-device", correction: 0.2)]
+        let scheduled = try #require(controller.schedule(.go, at: at))
+        
+        #expect(scheduled.audibleOnset == uncalibrated.audibleOnset)
+        
+        controller.stop()
+        await controller.deactivateSession()
+    }
+    
+    /// Device check: a calibration is stored under the route ID seen while
+    /// recording, but looked up while starts play in `.playback`.
+    @Test(.enabled(if: microphoneGranted && calibrationRequested))
+    func routeIDAndLatencyMatchAcrossCategories() async throws {
+        let session = AVAudioSession.sharedInstance()
+        
+        func snapshot(_ label: String) -> (id: String?, line: String) {
+            let port = session.currentRoute.outputs.first
+            return (
+                port?.uid,
+                "\(label): \(port?.portName ?? "none") [\(port?.portType.rawValue ?? "-")] uid \(port?.uid ?? "-"), " +
+                "outputLatency \(session.outputLatency * 1000) ms, ioBuffer \(session.ioBufferDuration * 1000) ms, rate \(session.sampleRate)"
+            )
+        }
+        
+        let starts = AudioController(theme: .eng1)
+        try await starts.activateSession()
+        let playback = snapshot("playback (starts)")
+        await starts.deactivateSession()
+        
+        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP, .defaultToSpeaker])
+        try session.setActive(true)
+        let recording = snapshot("playAndRecord (calibration)")
+        try session.setActive(false)
+        
+        Attachment.record("\(playback.line)\n\(recording.line)", named: "Route across categories")
+        #expect(playback.id == recording.id, "the calibration would be stored under a different route ID")
+    }
+
+    // MARK: - Hardware reconfiguration
+    
+    @Test
+    func schedulingRestartsEngineStoppedByReconfiguration() async throws {
+        let (controller, recorder) = try await activeController()
+        controller.engine.stop()
+        
+        let scheduled = controller.schedule(.go, at: MonotonicTimestamp(seconds: now().seconds + 0.2))
+        
+        #expect(scheduled != nil)
+        #expect(controller.engine.isRunning)
+        #expect(recorder.reasons.isEmpty)
+        
+        controller.stop()
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func reconfigurationWithNothingPlayingRestartsQuietly() async throws {
+        let (controller, recorder) = try await activeController()
+        controller.engine.stop()
+        
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: controller.engine)
+        await waitUntil { controller.engine.isRunning }
+        await settle()
+        
+        #expect(recorder.reasons.isEmpty)
+        #expect(controller.isSessionActive)
+        
+        await controller.deactivateSession()
+    }
+    
+    @Test
+    func reconfigurationCuttingOffScheduledGunReports() async throws {
+        let (controller, recorder) = try await activeController()
+        _ = try #require(controller.schedule(.go, at: MonotonicTimestamp(seconds: now().seconds + 1)))
+        controller.engine.stop()
+        
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: controller.engine)
+        await waitUntil { recorder.reasons.count == 1 }
+        
+        await controller.deactivateSession()
     }
 }
 

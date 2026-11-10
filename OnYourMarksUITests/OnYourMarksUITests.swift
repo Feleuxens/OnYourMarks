@@ -120,4 +120,16 @@ final class OnYourMarksUITests: XCTestCase {
         abortButton.tap()
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
     }
+    
+    func testSettingsOfferOutputChoiceAndCalibration() {
+        app.buttons["settingsButton"].tap()
+        
+        let picker = app.descendants(matching: .any)["outputPicker"]
+        let found = picker.waitForExistence(timeout: 5) && app.buttons["calibrateButton"].exists
+        
+        if !found {
+            add(XCTAttachment(string: app.debugDescription))
+        }
+        XCTAssertTrue(found)
+    }
 }

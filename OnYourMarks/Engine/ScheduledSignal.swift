@@ -16,6 +16,36 @@ nonisolated struct ScheduledSignal: Equatable, Sendable {
     /// Render start + output latency + onset offset in the file,
     /// widened by how far the route's reported latency can be trusted.
     let audibleOnset: TimeEstimate
+
+    /// What the audible onset was derived from.
+    let basis: SignalTimingBasis
+}
+
+/// Everything that turns a render time into the moment a signal is heard.
+/// Kept with the start, so a close decision can be traced back later.
+nonisolated struct SignalTimingBasis: Equatable, Sendable {
+    let route: OutputRoute?
+
+    /// As reported by the system for the route.
+    let outputLatency: TimeInterval
+
+    /// Where the audible transient sits in the sound file.
+    let onsetOffset: TimeInterval
+
+    /// The calibration that was applied, if the route has one.
+    let calibration: OutputCalibration?
+
+    let uncertainty: TimeInterval
+
+    func audibleOnset(renderStart: MonotonicTimestamp) -> TimeEstimate {
+        OutputTiming.audibleOnset(
+            renderStart: renderStart,
+            latency: outputLatency,
+            onsetOffset: onsetOffset,
+            correction: calibration?.correction ?? 0,
+            uncertainty: uncertainty
+        )
+    }
 }
 
 /// How render time maps to the moment a sound is heard.
@@ -57,14 +87,22 @@ nonisolated enum OutputTiming {
 
         return max(minimumWirelessUncertainty, latency * wirelessUncertaintyShare)
     }
+    
+    /// A calibration replaces the assumption, but never claims more
+    /// precision than a wired output has.
+    static func uncertainty(calibrated calibration: OutputCalibration) -> TimeInterval {
+        max(calibration.uncertainty, wiredUncertainty)
+    }
 
+    /// `correction` comes from a calibration of the output, if there is one.
     static func audibleOnset(
         renderStart: MonotonicTimestamp,
         latency: TimeInterval,
         onsetOffset: TimeInterval,
+        correction: TimeInterval = 0,
         uncertainty: TimeInterval
     ) -> TimeEstimate {
-        let best = renderStart.seconds + latency + onsetOffset
+        let best = renderStart.seconds + latency + onsetOffset + correction
 
         return TimeEstimate(
             best: MonotonicTimestamp(seconds: best),

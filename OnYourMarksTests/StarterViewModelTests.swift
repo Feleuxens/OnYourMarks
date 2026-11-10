@@ -13,7 +13,8 @@ struct StarterViewModelTests {
     private func makeViewModel(
         player: FakeSessionPlayer,
         musicResumeDelay: Duration = .seconds(60),
-        timeToStart: Double = 0
+        timeToStart: Double = 0,
+        calibrationStore: CalibrationStore? = nil
     ) -> StarterViewModel {
         let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
         let store = ConfigStore(defaults: defaults)
@@ -27,6 +28,7 @@ struct StarterViewModelTests {
 
         return StarterViewModel(
             configStore: store,
+            calibrationStore: calibrationStore ?? CalibrationStore(defaults: defaults),
             player: player,
             musicResumeDelay: musicResumeDelay
         )
@@ -51,8 +53,7 @@ struct StarterViewModelTests {
         await waitUntil { player.isActivationPending }
 
         #expect(vm.isRunning)
-        #expect(vm.isStarting)
-        #expect(vm.engine.state == .idle)
+        #expect(vm.engine.state == .preparing)
         #expect(player.played.isEmpty)
 
         player.releaseActivation()
@@ -60,7 +61,6 @@ struct StarterViewModelTests {
 
         #expect(player.played == [.onYourMarks, .set, .go])
         #expect(vm.lastSession?.outcome == .completed)
-        #expect(!vm.isStarting)
     }
 
     @Test
@@ -94,16 +94,15 @@ struct StarterViewModelTests {
 
         vm.abort()
 
-        // The start task still owns the activation until it has cleaned up.
-        #expect(vm.isRunning)
+        // The run ends right away; the activation still finishes and is undone.
+        #expect(!vm.isRunning)
 
         player.releaseActivation()
-        await waitUntil { !vm.isRunning }
+        await waitUntil { player.deactivateCount == 1 }
 
-        #expect(player.deactivateCount == 1)
         #expect(!player.isSessionActive)
         #expect(player.played.isEmpty)
-        #expect(vm.lastSession == nil)
+        #expect(vm.lastSession?.outcome == .aborted)
         #expect(vm.errorMessage == nil)
     }
 
@@ -138,11 +137,11 @@ struct StarterViewModelTests {
 
         player.failUnexpectedly("Output changed")
         player.releaseActivation()
-        await waitUntil { !vm.isRunning }
+        await waitUntil { player.deactivateCount == 1 }
 
+        #expect(!vm.isRunning)
         #expect(vm.errorMessage == "Output changed")
         #expect(player.played.isEmpty)
-        #expect(player.deactivateCount == 1)
     }
 
     @Test
@@ -175,7 +174,7 @@ struct StarterViewModelTests {
 
         #expect(vm.errorMessage?.contains("Activation refused") == true)
         #expect(player.played.isEmpty)
-        #expect(vm.lastSession == nil)
+        #expect(vm.lastSession?.outcome == vm.errorMessage.map(StartSessionOutcome.failed))
     }
 
     @Test
@@ -306,5 +305,239 @@ struct StarterViewModelTests {
         vm.resetConfig()
 
         #expect(store.load().blockTimeToSet == StartConfig.standard.blockTimeToSet)
+    }
+    
+    // MARK: - Output and calibration
+    
+    @Test
+    func changingOutputForwardsItAndEndsLingeringSession() async {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player)
+        
+        vm.start()
+        await waitUntil { vm.lastSession != nil && !vm.isRunning }
+        #expect(player.isSessionActive, "kept for the music resume delay")
+        
+        vm.config.audioOutput = .iPhoneSpeaker
+        
+        #expect(player.output == .iPhoneSpeaker)
+        await waitUntil { !player.isSessionActive }
+    }
+    
+    @Test
+    func savedOutputAndCalibrationsReachPlayerOnLaunch() {
+        let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
+        var config = StartConfig.standard
+        config.audioOutput = .iPhoneSpeaker
+        ConfigStore(defaults: defaults).save(config)
+        let calibration = OutputCalibration.fake()
+        CalibrationStore(defaults: defaults).save([calibration.routeID: calibration])
+        
+        let player = FakeSessionPlayer()
+        _ = StarterViewModel(
+            configStore: ConfigStore(defaults: defaults),
+            calibrationStore: CalibrationStore(defaults: defaults),
+            player: player
+        )
+        
+        #expect(player.output == .iPhoneSpeaker)
+        #expect(player.calibrations[calibration.routeID] == calibration)
+    }
+    
+    @Test
+    func successfulCalibrationIsStoredAndApplied() async {
+        let player = FakeSessionPlayer()
+        let calibration = OutputCalibration.fake(routeID: "headphones")
+        player.calibrationResult = calibration
+        let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
+        let store = CalibrationStore(defaults: defaults)
+        let vm = makeViewModel(player: player, calibrationStore: store)
+        
+        vm.calibrateOutput()
+        #expect(vm.isCalibrating)
+        await waitUntil { !vm.isCalibrating }
+        
+        #expect(vm.activeCalibration == calibration)
+        #expect(player.calibrations["headphones"] == calibration)
+        #expect(store.load()["headphones"] == calibration)
+        #expect(vm.errorMessage == nil)
+    }
+    
+    @Test
+    func failedCalibrationShowsErrorAndKeepsOldOne() async {
+        let player = FakeSessionPlayer()
+        let old = OutputCalibration.fake(routeID: "headphones", correction: 0.1)
+        let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
+        let store = CalibrationStore(defaults: defaults)
+        store.save([old.routeID: old])
+        player.calibrationError = CalibrationError.tooFewClicksHeard(heard: 2, needed: 4)
+        let vm = makeViewModel(player: player, calibrationStore: store)
+        
+        vm.calibrateOutput()
+        await waitUntil { !vm.isCalibrating }
+        
+        #expect(vm.errorMessage != nil)
+        #expect(vm.activeCalibration == old)
+    }
+    
+    @Test
+    func noStartWhileCalibrating() async {
+        let player = FakeSessionPlayer()
+        player.calibrationResult = .fake()
+        let vm = makeViewModel(player: player)
+        
+        vm.calibrateOutput()
+        vm.start()
+        
+        #expect(!vm.isRunning)
+        #expect(player.activateCount == 0)
+        await waitUntil { !vm.isCalibrating }
+    }
+    
+    @Test
+    func noCalibrationWhileRunning() async {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player, timeToStart: 10)
+        
+        vm.start()
+        await waitUntil { vm.engine.state == .waitForStart }
+        
+        vm.calibrateOutput()
+        
+        #expect(!vm.isCalibrating)
+        #expect(player.calibrationCount == 0)
+        vm.abort()
+    }
+    
+    @Test
+    func speakerModeUsesSpeakerCalibration() {
+        let player = FakeSessionPlayer()
+        let speaker = OutputCalibration.fake(routeID: "speaker", isBuiltInSpeaker: true)
+        let headphones = OutputCalibration.fake(routeID: "headphones")
+        let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
+        let store = CalibrationStore(defaults: defaults)
+        store.save([speaker.routeID: speaker, headphones.routeID: headphones])
+        let vm = makeViewModel(player: player, calibrationStore: store)
+        
+        // The system route stays on the headphones while the session is inactive.
+        #expect(vm.activeCalibration == headphones)
+        
+        vm.config.audioOutput = .iPhoneSpeaker
+        
+        #expect(vm.activeCalibration == speaker)
+    }
+    
+    @Test
+    func routeChangeUpdatesCurrentOutput() {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player)
+        let speaker = OutputRoute(id: "speaker", name: "Speaker", isWireless: false, isBuiltInSpeaker: true)
+        
+        player.changeRoute(to: speaker)
+        
+        #expect(vm.currentOutput == speaker)
+    }
+    
+    @Test
+    func removingCalibrationForgetsIt() async {
+        let player = FakeSessionPlayer()
+        let calibration = OutputCalibration.fake()
+        let defaults = UserDefaults(suiteName: "StarterViewModelTests-\(UUID().uuidString)")!
+        let store = CalibrationStore(defaults: defaults)
+        store.save([calibration.routeID: calibration])
+        let vm = makeViewModel(player: player, calibrationStore: store)
+        
+        vm.removeCalibration(calibration)
+        
+        #expect(vm.activeCalibration == nil)
+        #expect(player.calibrations.isEmpty)
+        #expect(store.load().isEmpty)
+    }
+    
+    // MARK: - Uncalibrated wireless warning
+    
+    @Test
+    func warnsForUncalibratedWirelessOutput() {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player)
+        
+        #expect(vm.uncalibratedWirelessOutput?.id == "headphones")
+    }
+    
+    @Test
+    func noWarningOnceCalibrated() async {
+        let player = FakeSessionPlayer()
+        player.calibrationResult = .fake(routeID: "headphones")
+        let vm = makeViewModel(player: player)
+        
+        vm.calibrateOutput()
+        await waitUntil { !vm.isCalibrating }
+        
+        #expect(vm.uncalibratedWirelessOutput == nil)
+    }
+    
+    @Test
+    func noWarningWhenForcingSpeaker() {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player)
+        
+        vm.config.audioOutput = .iPhoneSpeaker
+        
+        #expect(vm.uncalibratedWirelessOutput == nil)
+    }
+    
+    @Test
+    func noWarningForWiredOutput() {
+        let player = FakeSessionPlayer()
+        let vm = makeViewModel(player: player)
+        
+        player.changeRoute(to: OutputRoute(id: "speaker", name: "Speaker", isWireless: false, isBuiltInSpeaker: true))
+        
+        #expect(vm.uncalibratedWirelessOutput == nil)
+    }
+    
+    @Test
+    func warningAppearsWhenHeadphonesConnect() {
+        let player = FakeSessionPlayer()
+        player.route = OutputRoute(id: "speaker", name: "Speaker", isWireless: false, isBuiltInSpeaker: true)
+        let vm = makeViewModel(player: player)
+        #expect(vm.uncalibratedWirelessOutput == nil)
+        
+        player.changeRoute(to: OutputRoute(id: "airpods", name: "AirPods", isWireless: true, isBuiltInSpeaker: false))
+        
+        #expect(vm.uncalibratedWirelessOutput?.name == "AirPods")
+    }
+    
+    // MARK: - Calibration availability
+    
+    @Test
+    func wirelessOutputCanBeCalibrated() {
+        let vm = makeViewModel(player: FakeSessionPlayer())
+        
+        #expect(vm.canCalibrateOutput)
+    }
+    
+    @Test
+    func builtInSpeakerNeedsNoCalibration() async {
+        let player = FakeSessionPlayer()
+        player.route = OutputRoute(id: "speaker", name: "Speaker", isWireless: false, isBuiltInSpeaker: true)
+        player.calibrationResult = .fake(routeID: "speaker", isBuiltInSpeaker: true)
+        let vm = makeViewModel(player: player)
+        
+        #expect(!vm.canCalibrateOutput)
+        
+        vm.calibrateOutput()
+        await settle()
+        
+        #expect(player.calibrationCount == 0)
+    }
+    
+    @Test
+    func forcedSpeakerNeedsNoCalibration() {
+        let vm = makeViewModel(player: FakeSessionPlayer())
+        
+        vm.config.audioOutput = .iPhoneSpeaker
+        
+        #expect(!vm.canCalibrateOutput)
     }
 }

@@ -71,11 +71,12 @@ struct GunSchedulingTests {
         await waitUntil { !engine.isRunning }
         
         let kinds = eventKinds(engine)
-        let scheduledIndex = try #require(kinds.firstIndex(of: .gunScheduled))
+        let scheduledIndex = try #require(kinds.firstIndex { $0.isGunScheduled })
         let measuredIndex = try #require(kinds.firstIndex(of: .gunPlaybackMeasured))
         #expect(scheduledIndex < measuredIndex)
         
-        let scheduled = try #require(event(.gunScheduled, in: engine))
+        let scheduled = try #require(engine.lastSession?.events.first { $0.kind.isGunScheduled })
+        #expect(scheduled.kind == .gunScheduled(player.preflight.gunTiming))
         let renderStart = try #require(player.scheduleRequests.first)
         #expect(scheduled.time.best.seconds == renderStart.seconds + 0.05)
         #expect(engine.lastSession?.outcome == .completed)
@@ -161,8 +162,103 @@ struct GunSchedulingTests {
         engine.start(config: config)
         await waitUntil { !engine.isRunning }
         
-        #expect(reportedError?.contains("schedule") == true)
-        #expect(!eventKinds(engine).contains(.gunScheduled))
+        #expect(reportedError != nil)
+        #expect(engine.lastSession?.outcome == reportedError.map(StartSessionOutcome.failed))
+        #expect(!eventKinds(engine).contains { $0.isGunScheduled })
+    }
+    
+    // MARK: - Preflight
+    
+    @Test
+    func preflightIsRecordedBeforeTheFirstCommand() async throws {
+        let (engine, player, _, config) = makeEngine(holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { !engine.isRunning }
+        
+        let kinds = eventKinds(engine)
+        let preparedIndex = try #require(kinds.firstIndex(of: .audioPrepared(player.preflight)))
+        let firstCommandIndex = try #require(kinds.firstIndex(of: .stateChanged(.onYourMarks)))
+        
+        #expect(player.preflightCount == 1)
+        #expect(preparedIndex < firstCommandIndex)
+    }
+    
+    @Test
+    func slowPreflightDelaysTheFirstCommand() async {
+        let player = FakeSignalPlayer()
+        player.preflightDuration = .milliseconds(300)
+        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player)
+        
+        let began = CACurrentMediaTime()
+        engine.start(config: config)
+        
+        await waitUntil { engine.state == .preparing }
+        #expect(player.played.isEmpty)
+        
+        await waitUntil { !player.played.isEmpty }
+        #expect(CACurrentMediaTime() - began >= 0.3)
+        
+        await waitUntil { !engine.isRunning }
+        #expect(engine.lastSession?.outcome == .completed)
+    }
+    
+    @Test
+    func preflightRunsWithinTheInitialWait() async {
+        let player = FakeSignalPlayer()
+        player.preflightDuration = .milliseconds(200)
+        let (engine, _, _, _) = makeEngine(holdTime: 0, player: player)
+        
+        var config = StartConfig.instant
+        config.blockTimeToReady = 0.4
+        
+        let began = CACurrentMediaTime()
+        engine.start(config: config)
+        await waitUntil { !player.played.isEmpty }
+        let waited = CACurrentMediaTime() - began
+        
+        // The configured wait, not the wait plus the preflight.
+        #expect(waited >= 0.4)
+        #expect(waited < 0.55)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func failedPreflightFailsRunBeforeAnySignal() async {
+        let player = FakeSignalPlayer()
+        player.preflightError = PreflightError.noOutput
+        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player)
+        
+        var reportedError: String?
+        engine.onError = { reportedError = $0 }
+        
+        engine.start(config: config)
+        await waitUntil { !engine.isRunning }
+        
+        #expect(reportedError != nil)
+        #expect(engine.lastSession?.outcome == reportedError.map(StartSessionOutcome.failed))
+        #expect(player.played.isEmpty)
+    }
+    
+    @Test
+    func abortDuringPreflightNeverPlays() async {
+        let player = FakeSignalPlayer()
+        player.preflightDuration = .milliseconds(200)
+        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player)
+        
+        var reportedError: String?
+        engine.onError = { reportedError = $0 }
+        
+        engine.start(config: config)
+        await waitUntil { player.preflightCount == 1 }
+        engine.abort()
+        
+        try? await Task.sleep(for: .milliseconds(300))
+        
+        #expect(player.played.isEmpty)
+        #expect(reportedError == nil)
+        #expect(engine.lastSession?.outcome == .aborted)
     }
 }
 

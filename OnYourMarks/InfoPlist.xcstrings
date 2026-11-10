@@ -1,24 +1,54 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "NSCameraUsageDescription": {
-      "comment": "Camera permission prompt",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "OnYourMarks uses the camera to detect false starts."
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "OnYourMarks"
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription" : {
+      "comment" : "Camera permission prompt",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OnYourMarks nutzt die Kamera, um Fehlstarts zu erkennen."
           }
         },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OnYourMarks nutzt die Kamera, um Fehlstarts zu erkennen."
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "OnYourMarks uses the camera to detect false starts."
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Microphone permission prompt",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OnYourMarks nutzt das Mikrofon, um über den iPhone-Lautsprecher abzuspielen und die Audiolatenz zu messen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "OnYourMarks uses the microphone to play on the iPhone speaker and to measure audio latency."
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

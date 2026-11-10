@@ -197,6 +197,8 @@ final class StarterEngine {
         guard let gunTime else {
             let decision = StartDecision.definiteFalseStart
             
+            logger.info("Movement before the gun: false start")
+            
             lastDecision = decision
             
             record(
@@ -223,6 +225,15 @@ final class StarterEngine {
         let decision = decisionEngine.evaluateReaction(reaction, profile: profile)
         
         lastDecision = decision
+        
+        logger.info(
+            """
+            Reaction \(reaction.best * 1000, format: .fixed(precision: 1)) ms \
+            (\(reaction.earliest * 1000, format: .fixed(precision: 1)) to \
+            \(reaction.latest * 1000, format: .fixed(precision: 1)) ms): \
+            \(String(describing: decision), privacy: .public)
+            """
+        )
         
         record(
             .decision(decision),
@@ -273,6 +284,19 @@ final class StarterEngine {
             setState(phase.state)
             
             switch phase.state {
+            case .preparing:
+                // The preflight runs within the initial wait and only
+                // extends it when it takes longer.
+                let ready = MonotonicTimestamp(seconds: clock.now().seconds + (phase.duration ?? 0))
+                
+                do {
+                    try await runPreflight()
+                } catch {
+                    return .failed(String(localized: "The start could not be prepared: \(error.localizedDescription)"))
+                }
+                
+                guard !Task.isCancelled, await sleep(until: ready) else { return .cancelled }
+                
             case .waitForStart:
                 startMovementMonitoring()
                 
@@ -281,11 +305,11 @@ final class StarterEngine {
                 let requested = MonotonicTimestamp(seconds: clock.now().seconds + (phase.duration ?? 0))
                 
                 guard let gun = player.schedule(.go, at: requested) else {
-                    return .failed("Could not schedule \(Signal.go)")
+                    return .failed(String(localized: "The start signal could not be played."))
                 }
                 
                 scheduledGun = gun
-                record(.gunScheduled, at: gun.audibleOnset, source: .audioLocal)
+                record(.gunScheduled(gun.basis), at: gun.audibleOnset, source: .audioLocal)
                 
                 // Off the timing path: the gun no longer depends on this task.
                 player.logTimingDiagnostics(label: "Gun scheduled")
@@ -308,7 +332,7 @@ final class StarterEngine {
             default:
                 if let signal = phase.signal {
                     guard player.play(signal) else {
-                        return .failed("Could not play \(signal)")
+                        return .failed(String(localized: "The start signal could not be played."))
                     }
                     
                     guard await sleep(for: player.duration(of: signal)) else { return .cancelled }
@@ -318,6 +342,30 @@ final class StarterEngine {
             }
         }
         return .completed
+    }
+    
+    private func runPreflight() async throws {
+        let began = clock.now().seconds
+        let preflight = try await player.prepareForStart()
+        let timing = preflight.gunTiming
+        
+        record(.audioPrepared(preflight), source: .audioLocal)
+        
+        logger.info(
+            """
+            Preflight took \((self.clock.now().seconds - began) * 1000, format: .fixed(precision: 0)) ms: \
+            \(timing.route?.name ?? "no output", privacy: .public), \
+            \(preflight.sampleRate, format: .fixed(precision: 0)) Hz, \
+            buffer \(preflight.ioBufferDuration * 1000, format: .fixed(precision: 1)) ms, \
+            latency \(timing.outputLatency * 1000, format: .fixed(precision: 1)) ms, \
+            correction \((timing.calibration?.correction ?? 0) * 1000, format: .fixed(precision: 1)) ms, \
+            ±\(timing.uncertainty * 1000, format: .fixed(precision: 1)) ms
+            """
+        )
+        
+        if preflight.isCalibrationMissing {
+            logger.notice("Wireless output without calibration: the gun time is only an estimate")
+        }
     }
     
     /// False if cancelled.

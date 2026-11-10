@@ -14,10 +14,19 @@ class StarterViewModel {
         didSet {
             configStore.save(config)
             player.theme = config.soundTheme
+            
+            if config.audioOutput != oldValue.audioOutput {
+                player.output = config.audioOutput
+                // The new output applies from the next activation, so let the
+                // current one end now instead of after the music resume delay.
+                flushPendingSessionDeactivation()
+                refreshCurrentOutput()
+            }
         }
     }
     
     private let configStore: ConfigStore
+    private let calibrationStore: CalibrationStore
     private let player: AudioSessionPlayer
     
     let cameraDetector: CameraMovementDetector
@@ -35,38 +44,80 @@ class StarterViewModel {
     /// that waits this long, so the runner can get going without distraction.
     private let musicResumeDelay: Duration
     private var sessionDeactivationTask: Task<Void, Never>?
-    /// Set from the Start tap until the sequence runs (or the start was
-    /// given up). While set, no other start can begin.
-    private var startTask: Task<Void, Never>?
-    
     var cameraEnabled = false
     var cameraPermissionDenied = false
     var errorMessage: String?
     
-    var isStarting: Bool {
-        startTask != nil
+    /// The system route; with `.iPhoneSpeaker` starts still play on the speaker.
+    private(set) var currentOutput: OutputRoute?
+    private(set) var calibrations: [String: OutputCalibration]
+    private var calibrationTask: Task<Void, Never>?
+    
+    var isCalibrating: Bool {
+        calibrationTask != nil
     }
     
+    /// A wireless output the next start would play on without a calibration.
+    /// Its latency is only an estimate, so reaction times will be imprecise.
+    var uncalibratedWirelessOutput: OutputRoute? {
+        guard config.audioOutput == .automatic,
+              let output = currentOutput,
+              output.isWireless,
+              calibrations[output.id] == nil else {
+            return nil
+        }
+        return output
+    }
+    
+    /// The built-in speaker reports its own hardware latency, so only
+    /// other outputs gain from a calibration.
+    var canCalibrateOutput: Bool {
+        switch config.audioOutput {
+        case .automatic:
+            currentOutput.map { !$0.isBuiltInSpeaker } ?? false
+        case .iPhoneSpeaker:
+            false
+        }
+    }
+    
+    /// The calibration that applies to the next start.
+    var activeCalibration: OutputCalibration? {
+        switch config.audioOutput {
+        case .automatic:
+            currentOutput.flatMap { calibrations[$0.id] }
+        case .iPhoneSpeaker:
+            calibrations.values.first(where: \.isBuiltInSpeaker)
+        }
+    }
+
     var isRunning: Bool {
-        isStarting || engine.state != .idle
+        engine.isRunning
     }
     
     init(
         configStore: ConfigStore? = nil,
+        calibrationStore: CalibrationStore? = nil,
         cameraDetector: CameraMovementDetector? = nil,
         player: AudioSessionPlayer? = nil,
         musicResumeDelay: Duration = .seconds(2)
     ) {
         let configStore = configStore ?? ConfigStore()
-        let cameraDetector = cameraDetector ?? CameraMovementDetector()
-        self.configStore = configStore
         let config = configStore.load()
+        self.configStore = configStore
         self.config = config
         
+        let calibrationStore = calibrationStore ?? CalibrationStore()
+        let calibrations = calibrationStore.load()
+        self.calibrationStore = calibrationStore
+        self.calibrations = calibrations
+        
         let player = player ?? AudioController(theme: config.soundTheme)
+        player.output = config.audioOutput
+        player.calibrations = calibrations
         self.player = player
         self.musicResumeDelay = musicResumeDelay
         
+        let cameraDetector = cameraDetector ?? CameraMovementDetector()
         self.cameraDetector = cameraDetector
         self.engine = StarterEngine(player: player, movementDetector: cameraDetector)
         
@@ -81,48 +132,26 @@ class StarterViewModel {
         player.onUnexpectedStop = { [weak self] reason in
             self?.handleAudioFailure(reason)
         }
+        
+        player.onRouteChange = { [weak self] in
+            self?.refreshCurrentOutput()
+        }
+        
+        refreshCurrentOutput()
     }
     
     func start() {
-        guard !isRunning else { return }
+        guard !isRunning, !isCalibrating else { return }
         
         // Within the resume delay this keeps the session (and the music paused).
-        // A deactivation already talking to the system finishes first.
-        // (AudioController serializes transitions on its own as well.)
-        let pendingDeactivation = sessionDeactivationTask
-        pendingDeactivation?.cancel()
+        // A deactivation already talking to the system finishes first:
+        // the player runs session transitions one after the other.
+        sessionDeactivationTask?.cancel()
         sessionDeactivationTask = nil
         
-        startTask = Task { [weak self] in
-            await pendingDeactivation?.value
-            
-            guard let self else { return }
-            
-            // No new start can begin while the handle is set,
-            // so it is still ours when we clear it.
-            defer { startTask = nil }
-            
-            // Aborted before activation began: nothing to undo.
-            guard !Task.isCancelled else { return }
-            
-            do {
-                try await player.activateSession()
-            } catch {
-                // Not worth showing if the user already gave up on this start.
-                if !Task.isCancelled {
-                    errorMessage = "The audio session could not be started: \(error.localizedDescription)"
-                }
-                return
-            }
-            
-            // Aborted or sent to the background while activating.
-            guard !Task.isCancelled else {
-                await player.deactivateSession()
-                return
-            }
-            
-            engine.start(config: config)
-        }
+        // The engine activates the session in its preflight, within the
+        // wait before the first command.
+        engine.start(config: config)
     }
     
     private func runEnded() {
@@ -178,17 +207,54 @@ class StarterViewModel {
     }
     
     private func abort(reason: String?) {
-        // Activating: the start task notices and gives the session back.
-        if let startTask {
-            startTask.cancel()
-            return
-        }
-        
         engine.abort(reason: reason)
     }
     
     func resetConfig() {
         config = .standard
+    }
+    
+    // MARK: - Output
+    
+    func refreshCurrentOutput() {
+        currentOutput = player.currentOutput()
+    }
+    
+    /// Plays and records clicks on the output the next start would use.
+    func calibrateOutput() {
+        guard !isRunning, !isCalibrating, canCalibrateOutput else { return }
+        
+        let pendingDeactivation = sessionDeactivationTask
+        pendingDeactivation?.cancel()
+        sessionDeactivationTask = nil
+        
+        calibrationTask = Task { [weak self] in
+            await pendingDeactivation?.value
+            
+            guard let self else { return }
+            defer {
+                calibrationTask = nil
+                refreshCurrentOutput()
+            }
+            
+            do {
+                let calibration = try await player.calibrateCurrentOutput()
+                
+                calibrations[calibration.routeID] = calibration
+                calibrationStore.save(calibrations)
+                player.calibrations = calibrations
+            } catch is CancellationError {
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+    
+    func removeCalibration(_ calibration: OutputCalibration) {
+        calibrations[calibration.routeID] = nil
+        calibrationStore.save(calibrations)
+        player.calibrations = calibrations
     }
 
     func enableCamera() {
@@ -212,7 +278,7 @@ class StarterViewModel {
             cameraPermissionDenied = false
             
             guard cameraDetector.configureIfNeeded() else {
-                errorMessage = "The camera could not be configured."
+                errorMessage = String(localized: "The camera could not be configured.")
                 return
             }
             cameraDetector.startSession()
@@ -241,8 +307,10 @@ class StarterViewModel {
             abort()
         }
         
-        // Not disableCamera(): an aborted start may still be finishing
-        // its activation, and the camera must go off regardless.
+        // Recording stops in the background; the calibration cleans up after itself.
+        calibrationTask?.cancel()
+        
+        // Not disableCamera(): the camera must go off regardless.
         if cameraEnabled || cameraEnableTask != nil {
             stopCamera()
         }

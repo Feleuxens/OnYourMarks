@@ -15,12 +15,16 @@ struct SettingsView: View {
         ZStack {
             TrackBackground()
             Form {
+                AudioOutputSection(vm: vm)
+                
                 Section("Signal") {
                     Picker("Sound", selection: $vm.config.soundTheme) {
                         ForEach(SoundTheme.allCases) { theme in
                             Text(theme.displayName).tag(theme)
                         }
                     }
+                    // Loading another theme would interrupt the calibration's clicks.
+                    .disabled(vm.isCalibrating)
                 }
                 
                 Section("Start sequence (block)") {

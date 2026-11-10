@@ -23,6 +23,13 @@ class FakeSignalPlayer: SignalPlayer {
     /// Added between render start and the audible onset.
     var outputLatency: TimeInterval = 0
     
+    /// Returned by the preflight, which fails with `preflightError` if set.
+    var preflight = AudioPreflight.fake()
+    var preflightError: Error?
+    /// How long the preflight takes.
+    var preflightDuration: Duration = .zero
+    private(set) var preflightCount = 0
+    
     /// The scheduled signal that stop() has not cancelled yet.
     private(set) var pendingSchedule: ScheduledSignal?
     private(set) var scheduleRequests: [MonotonicTimestamp] = []
@@ -46,7 +53,8 @@ class FakeSignalPlayer: SignalPlayer {
         let scheduled = ScheduledSignal(
             signal: signal,
             renderStart: time,
-            audibleOnset: .exact(MonotonicTimestamp(seconds: time.seconds + outputLatency))
+            audibleOnset: .exact(MonotonicTimestamp(seconds: time.seconds + outputLatency)),
+            basis: preflight.gunTiming
         )
         pendingSchedule = scheduled
         return scheduled
@@ -77,6 +85,19 @@ class FakeSignalPlayer: SignalPlayer {
     func logTimingDiagnostics(label: String) {
         diagnostics.append((label, played.count))
     }
+    
+    func prepareForStart() async throws -> AudioPreflight {
+        preflightCount += 1
+        
+        if preflightDuration > .zero {
+            try await Task.sleep(for: preflightDuration)
+        }
+        
+        if let preflightError {
+            throw preflightError
+        }
+        return preflight
+    }
 }
 
 struct FakeActivationError: LocalizedError {
@@ -87,7 +108,17 @@ struct FakeActivationError: LocalizedError {
 @MainActor
 final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
     var theme: SoundTheme = .eng1
+    var output: AudioOutput = .automatic
+    var calibrations: [String: OutputCalibration] = [:]
     var onUnexpectedStop: ((String) -> Void)?
+    var onRouteChange: (() -> Void)?
+    
+    var route: OutputRoute? = OutputRoute(id: "headphones", name: "Headphones", isWireless: true, isBuiltInSpeaker: false)
+    
+    /// Returned by the next calibration; nil makes it throw `calibrationError`.
+    var calibrationResult: OutputCalibration?
+    var calibrationError: Error = FakeActivationError()
+    private(set) var calibrationCount = 0
     
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
@@ -99,6 +130,10 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
     
     private var pendingActivations: [CheckedContinuation<Void, Never>] = []
     
+    /// Like the real controller, transitions run one after the other and
+    /// to the end, also when the caller is cancelled.
+    private var transition: Task<Void, Never>?
+    
     var isActivationPending: Bool {
         !pendingActivations.isEmpty
     }
@@ -106,22 +141,44 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
     func activateSession() async throws {
         activateCount += 1
         
-        if holdsActivation {
-            await withCheckedContinuation { pendingActivations.append($0) }
+        let previous = transition
+        let activation = Task {
+            await previous?.value
+            
+            if holdsActivation {
+                await withCheckedContinuation { pendingActivations.append($0) }
+            }
+            
+            if let activationError {
+                throw activationError
+            }
+            
+            isSessionActive = true
         }
         
-        if let activationError {
-            throw activationError
-        }
-        
-        isSessionActive = true
+        transition = Task { _ = try? await activation.value }
+        try await activation.value
     }
     
     func deactivateSession() async {
-        guard isSessionActive else { return }
+        let previous = transition
+        let deactivation = Task {
+            await previous?.value
+            
+            guard isSessionActive else { return }
+            
+            deactivateCount += 1
+            isSessionActive = false
+        }
         
-        deactivateCount += 1
-        isSessionActive = false
+        transition = deactivation
+        await deactivation.value
+    }
+    
+    override func prepareForStart() async throws -> AudioPreflight {
+        try await activateSession()
+        try Task.checkCancellation()
+        return try await super.prepareForStart()
     }
     
     func releaseActivation() {
@@ -136,6 +193,24 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
     /// Simulates the system taking audio away (route change, call, reset).
     func failUnexpectedly(_ reason: String) {
         onUnexpectedStop?(reason)
+    }
+    
+    func currentOutput() -> OutputRoute? {
+        route
+    }
+    
+    func calibrateCurrentOutput() async throws -> OutputCalibration {
+        calibrationCount += 1
+        await Task.yield()
+        
+        guard let calibrationResult else { throw calibrationError }
+        return calibrationResult
+    }
+    
+    /// Simulates the system switching outputs.
+    func changeRoute(to route: OutputRoute?) {
+        self.route = route
+        onRouteChange?()
     }
 }
 
@@ -175,4 +250,48 @@ func waitUntil(
     }
 
     #expect(condition())
+}
+
+extension AudioPreflight {
+    static func fake(
+        route: OutputRoute? = OutputRoute(id: "speaker", name: "Speaker", isWireless: false, isBuiltInSpeaker: true),
+        calibration: OutputCalibration? = nil
+    ) -> AudioPreflight {
+        AudioPreflight(
+            sampleRate: 48_000,
+            ioBufferDuration: 0.005,
+            gunTiming: SignalTimingBasis(
+                route: route,
+                outputLatency: 0.012,
+                onsetOffset: 0.024,
+                calibration: calibration,
+                uncertainty: OutputTiming.wiredUncertainty
+            )
+        )
+    }
+}
+
+extension StartEventKind {
+    var isGunScheduled: Bool {
+        if case .gunScheduled = self { true } else { false }
+    }
+}
+
+extension OutputCalibration {
+    static func fake(
+        routeID: String = "headphones",
+        isBuiltInSpeaker: Bool = false,
+        correction: TimeInterval = 0.04,
+        uncertainty: TimeInterval = 0.005
+    ) -> OutputCalibration {
+        OutputCalibration(
+            routeID: routeID,
+            routeName: routeID,
+            isBuiltInSpeaker: isBuiltInSpeaker,
+            correction: correction,
+            uncertainty: uncertainty,
+            clickCount: 6,
+            date: .now
+        )
+    }
 }

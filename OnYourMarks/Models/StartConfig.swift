@@ -45,15 +45,16 @@ nonisolated struct StartConfig: Codable, Sendable {
     
     var startType: StartType = StartType.block
     var soundTheme: SoundTheme = SoundTheme.eng1
-    
+    var audioOutput: AudioOutput = .automatic
+
     static let standard = StartConfig()
     
     
     init() {}
     
     private enum CodingKeys: String, CodingKey {
-        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme
-    }
+        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput
+}
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -71,7 +72,8 @@ nonisolated struct StartConfig: Codable, Sendable {
         standingTimeToStartMax = try container.decodeIfPresent(Double.self, forKey: .standingTimeToStartMax) ?? defaults.standingTimeToStartMax
         
         soundTheme = try container.decodeIfPresent(SoundTheme.self, forKey: .soundTheme) ?? defaults.soundTheme
-        
+        audioOutput = try container.decodeIfPresent(AudioOutput.self, forKey: .audioOutput) ?? defaults.audioOutput
+
         normalize()
     }
     

@@ -42,8 +42,12 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     case monitoringStarted
     case monitoringStopped
     
-    /// The gun was placed on the audio clock; the event time is when it will be heard.
-    case gunScheduled
+    /// The silent check before the first command passed.
+    case audioPrepared(AudioPreflight)
+    
+    /// The gun was placed on the audio clock; the event time is when it will
+    /// be heard, derived from the attached output, latency and calibration.
+    case gunScheduled(SignalTimingBasis)
     
     /// Read back from the audio render timeline after the gun started;
     /// the event time is when it was heard.
