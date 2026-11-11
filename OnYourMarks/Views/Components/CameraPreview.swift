@@ -27,7 +27,10 @@ struct CameraPreview: UIViewRepresentable {
         v.videoPreviewLayer.videoGravity = .resizeAspectFill
         v.roster = roster
         v.falseStarters = falseStarters
-        detector.onAthletes = { [weak v] athletes in v?.athletes = athletes }
+        detector.onAthletes = { [weak v] athletes, phases in
+            v?.phases = phases
+            v?.athletes = athletes
+        }
         return v
     }
 
@@ -52,6 +55,9 @@ struct CameraPreview: UIViewRepresentable {
         var athletes: [TrackedAthlete] = [] {
             didSet { setNeedsLayout() }
         }
+
+        /// How still the roster athletes are while a start watches them.
+        var phases: [AthleteID: AthleteStability.Phase] = [:]
 
         var roster: AthleteRoster? {
             didSet { setNeedsLayout() }
@@ -181,7 +187,10 @@ struct CameraPreview: UIViewRepresentable {
 
                 numberLayer.isHidden = false
                 numberLayer.string = position.formatted()
-                numberLayer.backgroundColor = (isFalseStarter ? UIColor.systemRed : UIColor.systemYellow).cgColor
+                // Green once the athlete holds still.
+                let color: UIColor = isFalseStarter ? .systemRed
+                    : phases[athlete.id] == .stable ? .systemGreen : .systemYellow
+                numberLayer.backgroundColor = color.cgColor
                 numberLayer.foregroundColor = (isFalseStarter ? UIColor.white : UIColor.black).cgColor
                 numberLayer.frame = CGRect(
                     origin: CGPoint(

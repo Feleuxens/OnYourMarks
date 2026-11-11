@@ -16,16 +16,21 @@ nonisolated struct StartProfile: Equatable, Sendable {
     
     let automaticReactionThreshold: TimeInterval?
     
+    /// How stillness and the first movement are judged.
+    let motion: MotionProfile
+    
     static let block = StartProfile(
         startType: .block,
         usesSetCommand: true,
-        automaticReactionThreshold: 0.100
+        automaticReactionThreshold: 0.100,
+        motion: .block
     )
     
     static let standing = StartProfile(
         startType: .standing,
         usesSetCommand: false,
-        automaticReactionThreshold: nil
+        automaticReactionThreshold: nil,
+        motion: .standing
     )
 }
 

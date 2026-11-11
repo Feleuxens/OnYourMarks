@@ -123,7 +123,6 @@ struct MultiAthleteStartTests {
         detector.emitMovement(at: CACurrentMediaTime(), athlete: AthleteID(), quality: good)
         
         #expect(engine.athleteResults.isEmpty)
-        #expect(engine.lastDecision == nil)
         #expect(engine.state == .waitForStart)
         
         engine.abort()
@@ -204,7 +203,6 @@ struct MultiAthleteStartTests {
         detector.emitMovement(at: gun + 0.16, athlete: ids[2], quality: good)
         
         #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart, .definiteFalseStart, .legal])
-        #expect(engine.lastDecision == .definiteFalseStart)
         
         await waitUntil { !engine.isRunning }
         #expect(engine.lastSession?.outcome == .falseStart)
@@ -236,7 +234,7 @@ struct MultiAthleteStartTests {
         detector.emitMovement(at: CACurrentMediaTime(), athlete: ids[0], quality: poor)
         
         #expect(engine.state == .waitForStart)
-        #expect(engine.lastDecision == .uncertain)
+        #expect(engine.athleteResults.last?.decision == .uncertain)
         #expect(engine.athleteResults.map { $0.reaction } == [nil])
         #expect(player.recallCount == 0)
         #expect(events(engine).contains { $0.kind == .movementObserved(poor) && $0.athleteID == ids[0] })
@@ -260,7 +258,7 @@ struct MultiAthleteStartTests {
         
         detector.emitMovement(at: gun + 0.05, athlete: ids[0], quality: poor)
         
-        #expect(engine.lastDecision == .uncertain)
+        #expect(engine.athleteResults.last?.decision == .uncertain)
         #expect(engine.state == .start)
         
         engine.abort()

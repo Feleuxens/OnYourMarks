@@ -27,6 +27,18 @@ struct SettingsView: View {
                     .disabled(vm.isCalibrating)
                 }
                 
+                Section {
+                    Picker("Camera mount", selection: $vm.config.cameraMount) {
+                        Text("Tripod").tag(CameraMount.tripod)
+                        Text("Handheld").tag(CameraMount.handheld)
+                    }
+                    .accessibilityIdentifier("cameraMountPicker")
+                } header: {
+                    Text("Camera")
+                } footer: {
+                    Text("Handheld compensates for small movements of the camera. A tripod is more precise.")
+                }
+                
                 Section("Start sequence (block)") {
                     DelaySlider(id: 1, title: "Time until \"On Your Marks\"", time: $vm.config.blockTimeToReady, range: StartConfig.readyRange, step: 1, focusedSlider: $focusedSlider)
                     DelaySlider(id: 2, title: "Time until \"Set\"", time: $vm.config.blockTimeToSet, range: StartConfig.setRange, step: 1, focusedSlider: $focusedSlider)

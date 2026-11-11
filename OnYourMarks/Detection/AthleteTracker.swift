@@ -23,12 +23,12 @@ nonisolated struct TrackedAthlete: Identifiable, Equatable, Sendable {
 
 /// Pairs the bodies of a new frame with the known tracks.
 nonisolated enum AthleteAssociation {
-    /// How far a body may have moved between two analysed frames, in body
-    /// sizes. At the idle rate of 15 fps a walking person covers well under
-    /// a tenth of their size per frame; half a size leaves room for missed
-    /// frames. Seen from beside the track, neighbours can stand closer than
-    /// that in the picture; then the nearest pose decides.
-    static let maximumDistance: CGFloat = 0.5
+    /// How far a body may have moved between two analysed frames, in torso
+    /// lengths. At the idle rate of 15 fps a walking person covers about a
+    /// fifth of one per frame; a whole one leaves room for missed frames.
+    /// Seen from beside the track, neighbours can stand closer than that in
+    /// the picture; then the nearest pose decides.
+    static let maximumDistance: CGFloat = 1
 
     struct Pairing: Equatable {
         let track: Int
@@ -44,7 +44,7 @@ nonisolated enum AthleteAssociation {
 
         for (trackIndex, track) in tracks.enumerated() {
             for (poseIndex, pose) in poses.enumerated() {
-                let distance = track.distance(to: pose) / track.extent
+                let distance = track.distance(to: pose) / track.bodyScale
 
                 if distance <= maximumDistance {
                     candidates.append((distance, Pairing(track: trackIndex, pose: poseIndex)))

@@ -20,16 +20,11 @@ final class StarterEngine {
     private(set) var state: StarterState = .idle
     private(set) var isRunning: Bool = false
     
-    /// Same as `lastReactionEstimate?.best`; kept for a simple reaction-time display.
-    private(set) var lastReactionTime: TimeInterval?
-    
-    private(set) var lastReactionEstimate: DurationEstimate?
-    private(set) var lastDecision: StartDecision?
-    
     /// The athletes of the current or last start, fixed when monitoring began.
     private(set) var roster: AthleteRoster?
     
-    /// One entry per athlete that moved, in the order they moved.
+    /// One entry per athlete that moved, in the order they moved. A
+    /// detector that doesn't tell athletes apart contributes one entry.
     private(set) var athleteResults: [AthleteStartResult] = []
     
     private(set) var currentSession: StartSession?
@@ -70,6 +65,21 @@ final class StarterEngine {
     /// the engine (capture to delivery is tested to stay under 0.25 s).
     static let falseStartCollection: TimeInterval = DecisionEngine.independentMovementWindow + 0.25
     
+    /// How long the athletes get to hold still, each time, before the start
+    /// is given up. A starter would have them stand up well before that.
+    var readinessTimeout: TimeInterval = 10
+    
+    /// How often the gun may be taken back for unsteadiness before the
+    /// start is given up instead of holding the field any longer.
+    static let maximumHoldRestarts = 3
+    
+    /// The sleep the sequence is in while it waits for the athletes or for
+    /// the gun; cancelled to wake it early.
+    private var wakeableSleep: Task<Void, Never>?
+    
+    /// Set when an athlete became unsteady while the gun was pending.
+    private var holdWasDisturbed = false
+    
     private var monitoringActive: Bool = false
     private var precisionWindowActive = false
     
@@ -109,12 +119,8 @@ final class StarterEngine {
         self.clock = clock
         self.decisionEngine = decisionEngine
         
-        self.movementDetector.onMovement = { [weak self] observation in
-            self?.handleMovement(observation)
-        }
-        
-        self.movementDetector.onTrackingChange = { [weak self] change in
-            self?.handleTrackingChange(change)
+        self.movementDetector.onEvent = { [weak self] event in
+            self?.handle(event)
         }
     }
     
@@ -125,12 +131,10 @@ final class StarterEngine {
         
         gunTime = nil
         scheduledGun = nil
-        lastReactionTime = nil
-        lastReactionEstimate = nil
-        lastDecision = nil
         roster = nil
         athleteResults = []
         firstFalseStart = nil
+        holdWasDisturbed = false
         monitoringActive = false
         precisionWindowActive = false
         
@@ -155,11 +159,11 @@ final class StarterEngine {
             
             switch outcome {
             case .completed:
-                self.finishRun(outcome: .completed)
+                self.endRun(outcome: .completed)
                 
             case .failed(let message):
                 self.onError?(message)
-                self.finishRun(outcome: .failed(message))
+                self.endRun(outcome: .failed(message))
                 
             case .cancelled:
                 break
@@ -171,25 +175,12 @@ final class StarterEngine {
         guard isRunning else { return }
         
         sequenceTask?.cancel()
-        sequenceTask = nil
         
-        player.stop()
-        stopMovementMonitoring()
-        endPrecisionWindow()
-        
-        gunTime = nil
-        scheduledGun = nil
-        setState(.idle)
-        isRunning = false
-        
-        finalizeSession(
-            outcome: reason.map(StartSessionOutcome.failed) ?? .aborted
-        )
-        
-        onRunEnded?()
+        endRun(outcome: reason.map(StartSessionOutcome.failed) ?? .aborted)
     }
     
-    private func finishRun(outcome: StartSessionOutcome) {
+    /// Everything a run leaves behind, however it ended.
+    private func endRun(outcome: StartSessionOutcome) {
         guard isRunning else { return }
         
         sequenceTask = nil
@@ -206,6 +197,23 @@ final class StarterEngine {
         finalizeSession(outcome: outcome)
         
         onRunEnded?()
+    }
+    
+    private func handle(_ event: DetectorEvent) {
+        switch event {
+        case .movement(let observation):
+            handleMovement(observation)
+            
+        case .unsteady(let observation):
+            handleUnsteady(observation)
+            
+        case .trackingChanged(let change):
+            handleTrackingChange(change)
+            
+        case .readinessChanged:
+            // Wakes the wait for readiness; it looks at the detector itself.
+            wakeableSleep?.cancel()
+        }
     }
     
     private func handleMovement(
@@ -248,7 +256,7 @@ final class StarterEngine {
         record(
             .movementObserved(observation.quality),
             at: movementTime,
-            source: .cameraLocal,
+            source: movementDetector.source,
             athleteID: athleteID
         )
         
@@ -271,13 +279,10 @@ final class StarterEngine {
         
         let reaction = movementTime.duration(since: gunTime)
         
-        lastReactionEstimate = reaction
-        lastReactionTime = reaction.best
-        
         record(
             .reactionMeasured(reaction),
             at: movementTime,
-            source: .cameraLocal,
+            source: movementDetector.source,
             athleteID: athleteID
         )
         
@@ -306,11 +311,6 @@ final class StarterEngine {
     /// field, anything else lets the others go on being watched.
     private func conclude(_ result: AthleteStartResult, at time: TimeEstimate) {
         athleteResults.append(result)
-        
-        // A legal reaction that comes in after a false start doesn't replace it.
-        if lastDecision != .definiteFalseStart {
-            lastDecision = result.decision
-        }
         
         if result.decision == .definiteFalseStart, firstFalseStart == nil {
             firstFalseStart = time.best
@@ -352,7 +352,7 @@ final class StarterEngine {
         record(
             .athleteTrackingChanged(change.state),
             at: .exact(change.time),
-            source: .cameraLocal,
+            source: movementDetector.source,
             athleteID: change.athleteID
         )
     }
@@ -371,7 +371,7 @@ final class StarterEngine {
         setState(.falseStart)
         
         // Monitoring goes on: other athletes may have false-started as well,
-        // and their frames are still on the way. finishRun() ends it.
+        // and their frames are still on the way. endRun() ends it.
         let collectUntil = MonotonicTimestamp(seconds: clock.now().seconds + Self.falseStartCollection)
         
         sequenceTask = Task { [weak self] in
@@ -381,7 +381,7 @@ final class StarterEngine {
             
             guard !Task.isCancelled, await self.sleep(until: collectUntil) else { return }
             
-            self.finishRun(outcome: .falseStart)
+            self.endRun(outcome: .falseStart)
         }
     }
     
@@ -409,28 +409,16 @@ final class StarterEngine {
                     return .failed(String(localized: "The start could not be prepared: \(error.localizedDescription)"))
                 }
                 
-                guard !Task.isCancelled, await wait(until: ready, timeToGunAfterwards: timeToGun) else {
+                guard !Task.isCancelled, await wait(until: ready, gunIn: timeToGun) else {
                     return .cancelled
                 }
                 
             case .waitForStart:
-                startMovementMonitoring()
+                startMovementMonitoring(profile: config.startType.profile.motion)
                 
-                // The gun goes on the audio clock now, so the hold ends exactly
-                // as scheduled however late this task wakes up.
-                let requested = MonotonicTimestamp(seconds: clock.now().seconds + (phase.duration ?? 0))
-                
-                guard let gun = player.schedule(.go, at: requested) else {
-                    return .failed(String(localized: "The start signal could not be played."))
+                if let outcome = await runHold(duration: phase.duration ?? 0) {
+                    return outcome
                 }
-                
-                scheduledGun = gun
-                record(.gunScheduled(gun.basis), at: gun.audibleOnset, source: .audioLocal)
-                
-                // Off the timing path: the gun no longer depends on this task.
-                player.logTimingDiagnostics(label: "Gun scheduled")
-                
-                guard await wait(until: gun.renderStart, timeToGunAfterwards: 0) else { return .cancelled }
                 
             case .start:
                 // Already playing from the schedule.
@@ -454,10 +442,90 @@ final class StarterEngine {
                 }
                 
                 let end = MonotonicTimestamp(seconds: clock.now().seconds + plannedDuration(of: phase))
-                guard await wait(until: end, timeToGunAfterwards: timeToGun) else { return .cancelled }
+                guard await wait(until: end, gunIn: timeToGun) else { return .cancelled }
             }
         }
         return .completed
+    }
+    
+    /// Waits until the athletes hold still, then puts the gun on the audio
+    /// clock and waits for it. An unsteady athlete takes the gun back and
+    /// the hold begins again. Nil once the gun is playing.
+    private func runHold(duration: TimeInterval) async -> SequenceOutcome? {
+        var restarts = 0
+        
+        while true {
+            let readyBy = MonotonicTimestamp(seconds: clock.now().seconds + readinessTimeout)
+            
+            while !movementDetector.isReady {
+                guard clock.now() < readyBy else {
+                    logger.notice("The athletes did not hold still in time")
+                    return .failed(String(localized: "The athletes did not hold still, so the start was cancelled."))
+                }
+                
+                guard await sleep(until: readyBy, wakeable: true) else { return .cancelled }
+            }
+            
+            record(.athletesReady, source: movementDetector.source)
+            holdWasDisturbed = false
+            
+            // The hold counts from here, not from the command: the gun must
+            // not be predictable from the moment the athletes became still.
+            // On the audio clock, so it ends exactly as scheduled however
+            // late this task wakes up.
+            let requested = MonotonicTimestamp(seconds: clock.now().seconds + duration)
+            
+            guard let gun = player.schedule(.go, at: requested) else {
+                return .failed(String(localized: "The start signal could not be played."))
+            }
+            
+            scheduledGun = gun
+            record(.gunScheduled(gun.basis), at: gun.audibleOnset, source: .audioLocal)
+            
+            // Off the timing path: the gun no longer depends on this task.
+            player.logTimingDiagnostics(label: "Gun scheduled")
+            
+            while !holdWasDisturbed, clock.now() < gun.renderStart {
+                guard await wait(until: gun.renderStart, gunIn: 0, wakeable: true) else { return .cancelled }
+            }
+            
+            guard holdWasDisturbed else { return nil }
+            
+            player.stop()
+            scheduledGun = nil
+            record(.gunCancelled, source: .system)
+            
+            restarts += 1
+            logger.info("Gun taken back for unsteadiness (\(restarts) of \(Self.maximumHoldRestarts))")
+            
+            guard restarts <= Self.maximumHoldRestarts else {
+                return .failed(String(localized: "The athletes did not hold still, so the start was cancelled."))
+            }
+        }
+    }
+    
+    private func handleUnsteady(_ observation: MovementObservation) {
+        // Only before the gun: afterwards everyone is supposed to move.
+        guard state == .waitForStart, monitoringActive, gunTime == nil else { return }
+        
+        if let athleteID = observation.athleteID {
+            guard roster?.contains(athleteID) == true else { return }
+        }
+        
+        record(
+            .athleteUnsteady(observation.quality),
+            at: .exact(observation.time),
+            source: movementDetector.source,
+            athleteID: observation.athleteID
+        )
+        
+        // They have to become still again before the gun is armed anew.
+        movementDetector.resettle(observation.athleteID)
+        
+        if scheduledGun != nil {
+            holdWasDisturbed = true
+            wakeableSleep?.cancel()
+        }
     }
     
     private func runPreflight() async throws {
@@ -500,29 +568,51 @@ final class StarterEngine {
     ///
     /// The window is placed by the time left to the gun, not by a phase, so
     /// it works the same for every start type and however short the hold is.
-    private func wait(until deadline: MonotonicTimestamp, timeToGunAfterwards: TimeInterval) async -> Bool {
-        let windowStart = MonotonicTimestamp(seconds: deadline.seconds + timeToGunAfterwards - Self.precisionLead)
+    ///
+    /// - Parameter gunIn: how long after the deadline the gun is planned.
+    /// - Parameter wakeable: a detector event may end the sleep early; the
+    ///   caller then looks at what changed and waits again.
+    private func wait(until deadline: MonotonicTimestamp, gunIn: TimeInterval, wakeable: Bool = false) async -> Bool {
+        let windowStart = MonotonicTimestamp(seconds: deadline.seconds + gunIn - Self.precisionLead)
         
         if windowStart <= deadline {
-            guard await sleep(until: windowStart) else { return false }
+            guard await sleep(until: windowStart, wakeable: wakeable) else { return false }
+            
+            // Woken early: not the window's time yet.
+            guard !wakeable || clock.now() >= windowStart else { return true }
+            
             beginPrecisionWindow()
         }
         
-        return await sleep(until: deadline)
+        return await sleep(until: deadline, wakeable: wakeable)
     }
     
     /// False if cancelled.
     private func sleep(for seconds: TimeInterval) async -> Bool {
-        do {
-            try await Task.sleep(for: .seconds(max(0, seconds)))
-            return true
-        } catch {
-            return false
-        }
+        await sleep(until: MonotonicTimestamp(seconds: clock.now().seconds + seconds))
     }
     
-    private func sleep(until time: MonotonicTimestamp) async -> Bool {
-        await sleep(for: time.seconds - clock.now().seconds)
+    /// False if cancelled. A wakeable sleep also ends when `wakeableSleep`
+    /// is cancelled, and is then still true.
+    private func sleep(until time: MonotonicTimestamp, wakeable: Bool = false) async -> Bool {
+        let seconds = max(0, time.seconds - clock.now().seconds)
+        let sleeper = Task { _ = try? await Task.sleep(for: .seconds(seconds)) }
+        
+        if wakeable {
+            wakeableSleep = sleeper
+        }
+        
+        await withTaskCancellationHandler {
+            await sleeper.value
+        } onCancel: {
+            sleeper.cancel()
+        }
+        
+        if wakeable {
+            wakeableSleep = nil
+        }
+        
+        return !Task.isCancelled
     }
     
     /// Records when the gun was actually heard, as read back from the render timeline.
@@ -580,17 +670,17 @@ final class StarterEngine {
         record(.stateChanged(newState), source: .system)
     }
     
-    private func startMovementMonitoring() {
+    private func startMovementMonitoring(profile: MotionProfile) {
         guard !monitoringActive else {
             return
         }
         
-        let roster = movementDetector.startMonitoring()
+        let roster = movementDetector.startMonitoring(profile: profile)
         self.roster = roster
         monitoringActive = true
         
         record(.monitoringStarted, source: .system)
-        record(.rosterEstablished(roster), source: .cameraLocal)
+        record(.rosterEstablished(roster), source: movementDetector.source)
         
         logger.info("Roster: \(roster.entries.count) athletes")
     }

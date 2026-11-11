@@ -67,6 +67,15 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     /// if the detector knows.
     case movementObserved(TrackingQuality?)
     
+    /// Every athlete the detector can judge holds still; the gun is armed next.
+    case athletesReady
+    
+    /// An athlete left the resting pose without starting. Not a fault.
+    case athleteUnsteady(TrackingQuality?)
+    
+    /// The pending gun was taken back because an athlete was unsteady.
+    case gunCancelled
+    
     case reactionMeasured(DurationEstimate)
     
     case decision(StartDecision)

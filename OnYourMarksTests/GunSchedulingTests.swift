@@ -95,9 +95,9 @@ struct GunSchedulingTests {
         let audible = try #require(player.pendingSchedule?.audibleOnset.best)
         detector.emitMovement(at: audible.seconds + 0.15)
         
-        let reaction = try #require(engine.lastReactionTime)
+        let reaction = try #require(engine.athleteResults.last?.reaction?.best)
         #expect(abs(reaction - 0.15) < 0.000_001)
-        #expect(engine.lastDecision == .legal)
+        #expect(engine.athleteResults.last?.decision == .legal)
         
         engine.abort()
     }
@@ -116,7 +116,7 @@ struct GunSchedulingTests {
         let renderStart = try #require(player.pendingSchedule?.renderStart)
         detector.emitMovement(at: renderStart.seconds + 0.01)
         
-        #expect(engine.lastDecision == .definiteFalseStart)
+        #expect(engine.athleteResults.last?.decision == .definiteFalseStart)
         await waitUntil { !engine.isRunning }
         #expect(engine.lastSession?.outcome == .falseStart)
     }

@@ -62,6 +62,18 @@ struct ConfigTests {
     }
 
     @Test
+    func cameraMountDefaultsToTripodAndRoundTrips() throws {
+        let old = try JSONDecoder().decode(StartConfig.self, from: Data(#"{"blockTimeToSet": 5}"#.utf8))
+        #expect(old.cameraMount == .tripod)
+
+        var config = StartConfig.standard
+        config.cameraMount = .handheld
+
+        let restored = try JSONDecoder().decode(StartConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.cameraMount == .handheld)
+    }
+
+    @Test
     func storeRoundTripsConfig() {
         let (store, _) = makeStore()
 

@@ -10,16 +10,29 @@ import Vision
 /// Follows the athletes in the camera's frames and detects each one's
 /// first movement.
 final class PoseMotionDetector: MovementDetector {
-    /// Every athlete after each analysed frame, for the preview overlay.
-    var onAthletes: (([TrackedAthlete]) -> Void)?
+    /// Every athlete after each analysed frame and, while monitoring, how
+    /// still the ones on the roster are. For the preview overlay.
+    var onAthletes: (([TrackedAthlete], [AthleteID: AthleteStability.Phase]) -> Void)?
 
-    var onMovement: ((MovementObservation) -> Void)?
-    var onTrackingChange: ((AthleteTrackingChange) -> Void)?
+    var onEvent: ((DetectorEvent) -> Void)?
 
-    private(set) var isMonitoring = false
+    let source = MeasurementSource.cameraLocal
+
+    private(set) var isReady = false
+
+    /// For a camera held in the hand: takes the camera's own movement out
+    /// of the athletes'. Costs an image registration per frame, so it stays
+    /// off on a tripod.
+    var compensatesCameraMotion = false {
+        didSet {
+            let compensates = compensatesCameraMotion
+            tracking.withLock { $0.compensatesCameraMotion = compensates }
+        }
+    }
 
     private let camera: CameraController
     private nonisolated let poseTracker = PoseTracker()
+    private nonisolated let cameraMotion = CameraMotionEstimator()
     private nonisolated let tracking = Mutex(Tracking())
 
     /// Shared between the capture queue and the main actor.
@@ -27,6 +40,9 @@ final class PoseMotionDetector: MovementDetector {
         var tracker = AthleteTracker()
         var monitor = AthleteMotionMonitor()
         var athletes: [TrackedAthlete] = []
+        var compensatesCameraMotion = false
+        /// The next frame becomes the picture camera movement is measured against.
+        var needsCameraReference = false
     }
 
     init(camera: CameraController) {
@@ -38,13 +54,22 @@ final class PoseMotionDetector: MovementDetector {
     }
 
     @discardableResult
-    func startMonitoring() -> AthleteRoster {
-        isMonitoring = true
-
-        return tracking.withLock {
-            let roster = $0.monitor.begin(with: $0.athletes)
+    func startMonitoring(profile: MotionProfile) -> AthleteRoster {
+        let (roster, ready) = tracking.withLock {
+            let roster = $0.monitor.begin(with: $0.athletes, profile: profile)
             $0.tracker.retained = Set(roster.entries.map { $0.id })
-            return roster
+            $0.needsCameraReference = true
+            return (roster, $0.monitor.isReady)
+        }
+
+        isReady = ready
+        return roster
+    }
+
+    func resettle(_ athlete: AthleteID?) {
+        isReady = tracking.withLock {
+            $0.monitor.resettle(athlete)
+            return $0.monitor.isReady
         }
     }
 
@@ -53,7 +78,7 @@ final class PoseMotionDetector: MovementDetector {
             $0.monitor.end()
             $0.tracker.retained = []
         }
-        isMonitoring = false
+        isReady = false
     }
 
     /// Forgets the athletes; the next ones in view get new IDs.
@@ -77,122 +102,36 @@ final class PoseMotionDetector: MovementDetector {
     private nonisolated func process(_ frame: CameraFrame) {
         let poses = poseTracker.poses(in: frame)
 
-        let (athletes, update) = tracking.withLock {
+        let (compensates, needsReference) = tracking.withLock {
+            defer { $0.needsCameraReference = false }
+            return ($0.compensatesCameraMotion && $0.monitor.roster != nil, $0.needsCameraReference)
+        }
+
+        if needsReference || !compensates {
+            cameraMotion.reset()
+        }
+        let cameraOffset = compensates ? cameraMotion.offset(in: frame) : .zero
+
+        let (athletes, phases, events) = tracking.withLock {
             let athletes = $0.tracker.update(with: poses, at: frame.timestamp)
             $0.athletes = athletes
-            return (athletes, $0.monitor.process(athletes, at: frame.timestamp))
+            let events = $0.monitor.process(athletes, cameraOffset: cameraOffset, at: frame.timestamp)
+            return (athletes, $0.monitor.phases, events)
         }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            onAthletes?(athletes)
-            update.trackingChanges.forEach { onTrackingChange?($0) }
-            update.movements.forEach { onMovement?($0) }
-        }
-    }
-}
+            onAthletes?(athletes, phases)
 
-nonisolated struct MotionState {
-    typealias Joints = [VNHumanBodyPoseObservation.JointName: CGPoint]
-    
-    static let baselineFrameCount = 8
-    
-    /// How far a joint has to move from its resting place, in torso
-    /// lengths. Measuring in the athlete's own size instead of in the
-    /// picture makes the same real movement count the same for an athlete
-    /// near the camera and one further away. About 15 cm for an adult;
-    /// reasoned, not yet confirmed in the field.
-    static let movementThreshold: CGFloat = 0.3
-    
-    /// Smallest body scale, as a share of the picture's height. Keeps a
-    /// degenerate baseline from turning joint noise into movement.
-    static let minimumBodyScale: CGFloat = 0.02
-    
-    private var isMonitoring = false
-    private var hasTriggered = false
-    private var baseline: Joints?
-    private var baselineFrames = 0
-    
-    mutating func reset(monitoring: Bool) {
-        isMonitoring = monitoring
-        hasTriggered = false
-        baseline = nil
-        baselineFrames = 0
-    }
-    
-    mutating func process(
-        _ joints: Joints,
-        aspectRatio: CGFloat = 1
-    ) -> Bool {
-        guard isMonitoring, !hasTriggered, !joints.isEmpty else {
-            return false
-        }
-        
-        if baselineFrames < Self.baselineFrameCount {
-            mergeBaseline(joints)
-            baselineFrames += 1
-            return false
-        }
-        
-        guard let baseline else { return false }
-        
-        let scale = Self.bodyScale(of: baseline, aspectRatio: aspectRatio)
-        
-        var maxDisplacement: CGFloat = 0
-        for (joint, position) in joints {
-            if let base = baseline[joint] {
-                maxDisplacement = max(maxDisplacement, Self.distance(position, base, aspectRatio: aspectRatio))
-            }
-        }
-        
-        guard maxDisplacement / scale > Self.movementThreshold else {
-            return false
-        }
-        
-        hasTriggered = true
-        return true
-    }
-    
-    /// The athlete's size in the picture: the length of the torso, the most
-    /// rigid part of the body. Without neck and root, a shoulder to its hip;
-    /// without those, the box around all joints.
-    static func bodyScale(of joints: Joints, aspectRatio: CGFloat) -> CGFloat {
-        let segments: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
-            (.neck, .root), (.leftShoulder, .leftHip), (.rightShoulder, .rightHip)
-        ]
-        
-        for (upper, lower) in segments {
-            if let a = joints[upper], let b = joints[lower] {
-                return max(distance(a, b, aspectRatio: aspectRatio), minimumBodyScale)
-            }
-        }
-        
-        let xs = joints.values.map { $0.x * aspectRatio }
-        let ys = joints.values.map { $0.y }
-        let width = (xs.max() ?? 0) - (xs.min() ?? 0)
-        let height = (ys.max() ?? 0) - (ys.min() ?? 0)
-        return max(hypot(width, height), minimumBodyScale)
-    }
-    
-    /// In picture heights, so that a length counts the same in every direction.
-    private static func distance(_ a: CGPoint, _ b: CGPoint, aspectRatio: CGFloat) -> CGFloat {
-        hypot((a.x - b.x) * aspectRatio, a.y - b.y)
-    }
-    
-    private mutating func mergeBaseline(
-        _ joints: Joints
-    ) {
-        guard baseline != nil else {
-            baseline = joints
-            return
-        }
-        
-        for (joint, position) in joints {
-            if let existing = baseline?[joint] {
-                baseline?[joint] = CGPoint(x: (existing.x + position.x) / 2, y: (existing.y + position.y) / 2)
-            } else {
-                baseline?[joint] = position
+            // A frame analysed before monitoring ended has nothing to say any more.
+            guard tracking.withLock({ $0.monitor.roster != nil }) else { return }
+
+            for event in events {
+                if case .readinessChanged(let ready) = event {
+                    isReady = ready
+                }
+                onEvent?(event)
             }
         }
     }

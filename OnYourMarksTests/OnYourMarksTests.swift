@@ -313,7 +313,7 @@ struct OnYourMarksTests {
         await waitUntil { !engine.isRunning }
         
         #expect(engine.lastSession?.outcome == .falseStart)
-        #expect(engine.lastDecision == .definiteFalseStart)
+        #expect(engine.athleteResults.last?.decision == .definiteFalseStart)
         #expect(detector.stopCount == 1)
         #expect(player.recallCount == 3)
         #expect(runEndedCount == 1)
@@ -334,7 +334,7 @@ struct OnYourMarksTests {
         
         #expect(engine.isRunning)
         #expect(engine.state != .falseStart)
-        #expect(engine.lastDecision == nil)
+        #expect(engine.athleteResults.isEmpty)
         
         engine.abort()
     }

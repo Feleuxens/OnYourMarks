@@ -551,7 +551,7 @@ struct StarterViewModelTests {
         vm.start()
         await waitUntil { vm.engine.state == .waitForStart }
 
-        vm.motionDetector.onMovement?(MovementObservation(time: MonotonicTimestamp(seconds: CACurrentMediaTime())))
+        vm.motionDetector.onEvent?(.movement(MovementObservation(time: MonotonicTimestamp(seconds: CACurrentMediaTime()))))
         await waitUntil { !vm.isRunning }
 
         #expect(vm.falseStarts.map { $0.decision } == [.definiteFalseStart])

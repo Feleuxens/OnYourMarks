@@ -69,11 +69,29 @@ struct DetectedPoseTests {
     }
 
     @Test
-    func extentNeverCollapses() {
-        let single = DetectedPose(joints: [.neck: CGPoint(x: 0.5, y: 0.5)], confidence: 0.9)
+    func bodyScaleFallsBackFromTorsoToShoulderAndHipToAllJoints() {
+        let torso: DetectedPose.Joints = [.neck: CGPoint(x: 0.5, y: 0.8), .root: CGPoint(x: 0.5, y: 0.5)]
+        let side: DetectedPose.Joints = [.rightShoulder: CGPoint(x: 0.5, y: 0.7), .rightHip: CGPoint(x: 0.5, y: 0.5)]
+        let legs: DetectedPose.Joints = [.leftKnee: CGPoint(x: 0.5, y: 0.4), .leftAnkle: CGPoint(x: 0.5, y: 0.3)]
+        let single: DetectedPose.Joints = [.neck: CGPoint(x: 0.5, y: 0.8)]
 
-        #expect(single.extent == DetectedPose.minimumExtent)
-        #expect(abs(pose(at: 0.5).extent - hypot(0.06, 0.4)) < 0.001)
+        #expect(abs(DetectedPose.bodyScale(of: torso, aspectRatio: 1) - 0.3) < 0.001)
+        #expect(abs(DetectedPose.bodyScale(of: side, aspectRatio: 1) - 0.2) < 0.001)
+        #expect(abs(DetectedPose.bodyScale(of: legs, aspectRatio: 1) - 0.1) < 0.001)
+        #expect(DetectedPose.bodyScale(of: single, aspectRatio: 1) == DetectedPose.minimumBodyScale)
+        #expect(abs(pose(at: 0.5).bodyScale - 0.2) < 0.001)
+    }
+
+    @Test
+    func lengthsCountTheSameInEveryDirectionOfAPortraitPicture() {
+        let aspectRatio: CGFloat = 9.0 / 16.0
+        let origin = CGPoint(x: 0.5, y: 0.5)
+
+        // The same length covers a larger share of the narrow side.
+        let sideways = DetectedPose.distance(origin, CGPoint(x: 0.5 + 0.1 / aspectRatio, y: 0.5), aspectRatio: aspectRatio)
+        let upwards = DetectedPose.distance(origin, CGPoint(x: 0.5, y: 0.6), aspectRatio: aspectRatio)
+
+        #expect(abs(sideways - upwards) < 0.000_001)
     }
 
     @Test
@@ -348,23 +366,50 @@ struct TrackingQualityTests {
 }
 
 struct AthleteMotionMonitorTests {
-    /// A tracker that has confirmed one athlete at each position.
-    private func tracking(_ positions: [CGFloat]) -> (AthleteTracker, [TrackedAthlete]) {
+    /// A tracker and a monitor fed frame by frame at the precision rate.
+    private struct Scene {
         var tracker = AthleteTracker()
-        let athletes = run(&tracker, poses: positions.map { pose(at: $0) }, from: 0, frames: 5)
-        return (tracker, athletes)
-    }
+        var monitor = AthleteMotionMonitor()
+        var now: TimeInterval = 0
+        /// Whether the monitor is ready, as its updates reported it.
+        var reportedReadiness: [Bool] = []
 
-    /// Monitors past the baseline with everyone standing still.
-    private func settle(
-        _ monitor: inout AthleteMotionMonitor,
-        _ tracker: inout AthleteTracker,
-        positions: [CGFloat]
-    ) {
-        for index in 0..<MotionState.baselineFrameCount {
-            let now = time(1 + Double(index) * frame)
-            let update = monitor.process(tracker.update(with: positions.map { pose(at: $0) }, at: now), at: now)
-            #expect(update.movements.isEmpty)
+        @discardableResult
+        mutating func track(_ poses: [DetectedPose], frames: Int = 1) -> [TrackedAthlete] {
+            var athletes: [TrackedAthlete] = []
+            for _ in 0..<frames {
+                now += frame
+                athletes = tracker.update(with: poses, at: time(now))
+            }
+            return athletes
+        }
+
+        @discardableResult
+        mutating func step(_ poses: [DetectedPose], cameraOffset: CGPoint = .zero) -> [DetectorEvent] {
+            now += frame
+            let update = monitor.process(
+                tracker.update(with: poses, at: time(now)), cameraOffset: cameraOffset, at: time(now)
+            )
+            if let readiness = update.readiness {
+                reportedReadiness.append(readiness)
+            }
+            return update
+        }
+
+        /// Everyone stands still for long enough to become stable.
+        mutating func settle(_ poses: [DetectedPose]) {
+            for _ in 0..<(Int(MotionProfile.block.settleDuration / frame) + 3) {
+                let update = step(poses)
+                #expect(update.movements.isEmpty)
+            }
+        }
+
+        /// Confirms one athlete per position and fixes them as the roster.
+        mutating func begin(_ positions: [CGFloat]) -> [TrackedAthlete] {
+            let athletes = track(positions.map { pose(at: $0) }, frames: 5)
+            let roster = monitor.begin(with: athletes, profile: .block)
+            tracker.retained = Set(roster.entries.map { $0.id })
+            return athletes
         }
     }
 
@@ -377,7 +422,7 @@ struct AthleteMotionMonitorTests {
         try #require(athletes.map { $0.state } == [.occluded, .tracked, .tentative])
 
         var monitor = AthleteMotionMonitor()
-        let roster = monitor.begin(with: athletes)
+        let roster = monitor.begin(with: athletes, profile: .block)
 
         #expect(roster.entries.map { $0.id } == [athletes[0].id, athletes[1].id])
         #expect(roster.entries.map { $0.position } == [1, 2])
@@ -388,71 +433,150 @@ struct AthleteMotionMonitorTests {
     }
 
     @Test
-    func eachAthletesMovementIsReportedOnceWithTheirID() throws {
-        var (tracker, athletes) = tracking([0.2, 0.6])
+    func readyOnceEveryoneHoldsStill() {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+        #expect(!scene.monitor.isReady)
+
+        // The right athlete keeps shifting about.
+        for step in 0..<80 {
+            scene.step([pose(at: 0.2), pose(at: 0.6, shiftedBy: step % 20 < 10 ? 0 : 0.05)])
+        }
+        #expect(scene.monitor.phases[athletes[0].id] == .stable)
+        #expect(scene.monitor.phases[athletes[1].id] != .stable)
+        #expect(!scene.monitor.isReady)
+        #expect(scene.reportedReadiness.isEmpty)
+
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+
+        #expect(scene.monitor.isReady)
+        #expect(scene.reportedReadiness == [true])
+    }
+
+    @Test
+    func anEmptyRosterIsReadyAndNoRosterIsNot() {
         var monitor = AthleteMotionMonitor()
-        _ = monitor.begin(with: athletes)
-        settle(&monitor, &tracker, positions: [0.2, 0.6])
+        #expect(!monitor.isReady)
+
+        _ = monitor.begin(with: [], profile: .block)
+        #expect(monitor.isReady)
+    }
+
+    @Test
+    func aHiddenAthleteDoesNotHoldUpTheStart() {
+        var scene = Scene()
+        _ = scene.begin([0.2, 0.6])
+
+        // The right athlete disappears behind someone before ever being still.
+        scene.settle([pose(at: 0.2)])
+
+        #expect(scene.monitor.isReady)
+    }
+
+    @Test
+    func gettingIntoPositionIsNotAMovement() {
+        var scene = Scene()
+        _ = scene.begin([0.3])
+
+        // Rising into the set position: far more than the threshold.
+        for step in 0..<40 {
+            let update = scene.step([pose(at: 0.3, shiftedBy: CGFloat(step) * 0.005)])
+            #expect(update.movements.isEmpty)
+            #expect(update.unsteady.isEmpty)
+        }
+        #expect(!scene.monitor.isReady)
+    }
+
+    @Test
+    func eachAthletesMovementIsReportedOnceWithTheirID() {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
 
         // Only the right athlete moves.
-        var now = time(2)
-        var update = monitor.process(
-            tracker.update(with: [pose(at: 0.2), pose(at: 0.6, shiftedBy: 0.08)], at: now), at: now
-        )
+        var update = scene.step([pose(at: 0.2), pose(at: 0.6, shiftedBy: 0.08)])
         #expect(update.movements.map { $0.athleteID } == [athletes[1].id])
-        #expect(update.movements.first?.time == now)
+        #expect(update.movements.first?.time == time(scene.now))
         #expect(update.movements.first?.quality?.level == .good)
 
         // The right one keeps moving, now the left one starts as well.
-        now = time(2 + frame)
-        update = monitor.process(
-            tracker.update(with: [pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.1)], at: now), at: now
-        )
+        update = scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.1)])
         #expect(update.movements.map { $0.athleteID } == [athletes[0].id])
 
-        now = time(2 + 2 * frame)
-        update = monitor.process(
-            tracker.update(with: [pose(at: 0.2, shiftedBy: 0.1), pose(at: 0.6, shiftedBy: 0.12)], at: now), at: now
-        )
+        update = scene.step([pose(at: 0.2, shiftedBy: 0.1), pose(at: 0.6, shiftedBy: 0.12)])
         #expect(update.movements.isEmpty)
     }
 
     @Test
     func someoneOutsideTheRosterIsNotWatched() {
-        var (tracker, athletes) = tracking([0.2])
-        var monitor = AthleteMotionMonitor()
-        _ = monitor.begin(with: athletes)
-        settle(&monitor, &tracker, positions: [0.2])
+        var scene = Scene()
+        _ = scene.begin([0.2])
+        scene.settle([pose(at: 0.2)])
 
         // A second person walks in and moves about.
         for step in 0..<30 {
-            let now = time(2 + Double(step) * frame)
-            let update = monitor.process(
-                tracker.update(with: [pose(at: 0.2), pose(at: 0.7, shiftedBy: CGFloat(step) * 0.01)], at: now),
-                at: now
-            )
+            let update = scene.step([pose(at: 0.2), pose(at: 0.7, shiftedBy: CGFloat(step) * 0.01)])
             #expect(update.movements.isEmpty)
+            #expect(update.unsteady.isEmpty)
             #expect(update.trackingChanges.isEmpty)
         }
+        #expect(scene.monitor.isReady)
     }
 
     @Test
-    func occlusionAndReturnAreReportedAndTheReturnIsPoorlyTracked() throws {
-        var (tracker, athletes) = tracking([0.2])
-        let id = athletes[0].id
-        var monitor = AthleteMotionMonitor()
-        _ = monitor.begin(with: athletes)
-        tracker.retained = [id]
-        settle(&monitor, &tracker, positions: [0.2])
+    func anUnsteadyAthleteIsReportedAndHasToSettleAgain() {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+
+        // The left athlete sags by a fifth of a torso and stays there.
+        var unsteady: [MovementObservation] = []
+        for _ in 0..<(Int(MotionProfile.block.unsteadyDelay / frame) + 3) {
+            let update = scene.step([pose(at: 0.2, shiftedBy: 0.04), pose(at: 0.6)])
+            #expect(update.movements.isEmpty)
+            unsteady += update.unsteady
+        }
+        #expect(unsteady.map { $0.athleteID } == [athletes[0].id])
+
+        scene.monitor.resettle(athletes[0].id)
+        #expect(!scene.monitor.isReady)
+        #expect(scene.monitor.phases[athletes[0].id] == .moving)
+        #expect(scene.monitor.phases[athletes[1].id] == .stable)
+
+        // Still again in the new place: that is the new resting pose.
+        scene.settle([pose(at: 0.2, shiftedBy: 0.04), pose(at: 0.6)])
+        #expect(scene.monitor.isReady)
+        #expect(scene.reportedReadiness == [true, true])
+    }
+
+    @Test
+    func aMovingCameraIsTakenOutOfTheAthletes() {
+        var scene = Scene()
+        _ = scene.begin([0.2, 0.6])
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+
+        // The whole picture shifts as far as a start would move a body.
+        let shaken = [pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.08)]
+
+        var compensated = scene
+        let update = compensated.step(shaken, cameraOffset: CGPoint(x: 0.08, y: 0))
+        #expect(update.movements.isEmpty)
+
+        #expect(scene.step(shaken).movements.count == 2)
+    }
+
+    @Test
+    func occlusionAndReturnAreReportedAndTheReturnIsPoorlyTracked() {
+        var scene = Scene()
+        let id = scene.begin([0.2])[0].id
+        scene.settle([pose(at: 0.2)])
 
         var changes: [AthleteTrackState] = []
         var movements: [MovementObservation] = []
 
         // Hidden for 0.4 s: no movement comes from the stale pose.
-        let hiddenFrom = 1 + Double(MotionState.baselineFrameCount) * frame
-        for step in 0..<48 {
-            let now = time(hiddenFrom + Double(step) * frame)
-            let update = monitor.process(tracker.update(with: [], at: now), at: now)
+        for _ in 0..<48 {
+            let update = scene.step([])
             changes += update.trackingChanges.map { $0.state }
             movements += update.movements
         }
@@ -460,26 +584,23 @@ struct AthleteMotionMonitorTests {
         #expect(movements.isEmpty)
 
         // Back, but displaced: a movement, on a track that can't be trusted yet.
-        let now = time(hiddenFrom + 48 * frame)
-        let update = monitor.process(tracker.update(with: [pose(at: 0.2, shiftedBy: 0.08)], at: now), at: now)
+        let update = scene.step([pose(at: 0.2, shiftedBy: 0.08)])
 
-        #expect(update.trackingChanges == [AthleteTrackingChange(athleteID: id, state: .tracked, time: now)])
+        #expect(update.trackingChanges == [AthleteTrackingChange(athleteID: id, state: .tracked, time: time(scene.now))])
         #expect(update.movements.map { $0.athleteID } == [id])
         #expect(update.movements.first?.quality?.level == .poor)
     }
 
     @Test
     func nothingIsReportedAfterTheEnd() {
-        var (tracker, athletes) = tracking([0.2])
-        var monitor = AthleteMotionMonitor()
-        _ = monitor.begin(with: athletes)
-        settle(&monitor, &tracker, positions: [0.2])
+        var scene = Scene()
+        _ = scene.begin([0.2])
+        scene.settle([pose(at: 0.2)])
 
-        monitor.end()
+        scene.monitor.end()
 
-        let now = time(2)
-        let update = monitor.process(tracker.update(with: [pose(at: 0.2, shiftedBy: 0.08)], at: now), at: now)
-        #expect(update == AthleteMotionMonitor.Update())
-        #expect(monitor.roster == nil)
+        #expect(scene.step([pose(at: 0.2, shiftedBy: 0.08)]).isEmpty)
+        #expect(scene.monitor.roster == nil)
+        #expect(!scene.monitor.isReady)
     }
 }

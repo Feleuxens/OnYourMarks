@@ -114,12 +114,32 @@
         }
       }
     },
+    "Camera" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamera"
+          }
+        }
+      }
+    },
     "Camera access required" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kamerazugriff erforderlich"
+          }
+        }
+      }
+    },
+    "Camera mount" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamerahalterung"
           }
         }
       }
@@ -210,6 +230,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fehlstart: Athleten %@ von links"
+          }
+        }
+      }
+    },
+    "Handheld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus der Hand"
+          }
+        }
+      }
+    },
+    "Handheld compensates for small movements of the camera. A tripod is more precise." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Aus der Hand“ gleicht kleine Bewegungen der Kamera aus. Mit Stativ ist die Messung genauer."
           }
         }
       }
@@ -434,6 +474,16 @@
         }
       }
     },
+    "The athletes did not hold still, so the start was cancelled." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Athleten standen nicht still, daher wurde der Start abgebrochen."
+          }
+        }
+      }
+    },
     "The audio engine could not be started." : {
       "localizations" : {
         "de" : {
@@ -620,6 +670,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Zeit bis „Set“"
+          }
+        }
+      }
+    },
+    "Tripod" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stativ"
           }
         }
       }

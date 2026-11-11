@@ -219,18 +219,45 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
 }
 
 final class FakeMovementDetector: MovementDetector {
-    var onMovement: ((MovementObservation) -> Void)?
-    var onTrackingChange: ((AthleteTrackingChange) -> Void)?
+    var onEvent: ((DetectorEvent) -> Void)?
+    var source = MeasurementSource.cameraLocal
     
     /// Returned as the roster of each monitoring.
     var roster = AthleteRoster.empty
+    
+    /// Like a detector that sees no one, the fake is ready unless told otherwise.
+    private(set) var isReady = true
+    /// What `isReady` becomes when an athlete is made to settle again.
+    var isReadyAfterResettle = true
+    
+    private(set) var profiles: [MotionProfile] = []
+    private(set) var resettled: [AthleteID?] = []
+    
+    func setReady(_ ready: Bool) {
+        guard ready != isReady else { return }
+        
+        isReady = ready
+        onEvent?(.readinessChanged(ready))
+    }
+    
+    func resettle(_ athlete: AthleteID?) {
+        resettled.append(athlete)
+        isReady = isReadyAfterResettle
+    }
+    
+    func emitUnsteady(at time: TimeInterval, athlete: AthleteID? = nil, quality: TrackingQuality? = nil) {
+        onEvent?(
+            .unsteady(MovementObservation(time: MonotonicTimestamp(seconds: time), athleteID: athlete, quality: quality))
+        )
+    }
     
     private(set) var startCount = 0
     private(set) var stopCount = 0
     
     @discardableResult
-    func startMonitoring() -> AthleteRoster {
+    func startMonitoring(profile: MotionProfile) -> AthleteRoster {
         startCount += 1
+        profiles.append(profile)
         return roster
     }
     
@@ -259,14 +286,14 @@ final class FakeMovementDetector: MovementDetector {
         athlete: AthleteID? = nil,
         quality: TrackingQuality? = nil
     ) {
-        onMovement?(
-            MovementObservation(time: MonotonicTimestamp(seconds: time), athleteID: athlete, quality: quality)
+        onEvent?(
+            .movement(MovementObservation(time: MonotonicTimestamp(seconds: time), athleteID: athlete, quality: quality))
         )
     }
     
     func emitTrackingChange(_ state: AthleteTrackState, athlete: AthleteID, at time: TimeInterval) {
-        onTrackingChange?(
-            AthleteTrackingChange(athleteID: athlete, state: state, time: MonotonicTimestamp(seconds: time))
+        onEvent?(
+            .trackingChanged(AthleteTrackingChange(athleteID: athlete, state: state, time: MonotonicTimestamp(seconds: time)))
         )
     }
 }
@@ -306,6 +333,25 @@ extension AudioPreflight {
                 uncertainty: OutputTiming.wiredUncertainty
             )
         )
+    }
+}
+
+/// The events of one frame, by kind.
+extension [DetectorEvent] {
+    var movements: [MovementObservation] {
+        compactMap { if case .movement(let observation) = $0 { observation } else { nil } }
+    }
+    
+    var unsteady: [MovementObservation] {
+        compactMap { if case .unsteady(let observation) = $0 { observation } else { nil } }
+    }
+    
+    var trackingChanges: [AthleteTrackingChange] {
+        compactMap { if case .trackingChanged(let change) = $0 { change } else { nil } }
+    }
+    
+    var readiness: Bool? {
+        compactMap { if case .readinessChanged(let ready) = $0 { ready } else { nil } }.last
     }
 }
 

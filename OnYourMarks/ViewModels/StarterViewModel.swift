@@ -14,6 +14,7 @@ class StarterViewModel {
         didSet {
             configStore.save(config)
             player.theme = config.soundTheme
+            motionDetector.compensatesCameraMotion = config.cameraMount == .handheld
             
             if config.audioOutput != oldValue.audioOutput {
                 player.output = config.audioOutput
@@ -128,6 +129,7 @@ class StarterViewModel {
         let motionDetector = PoseMotionDetector(camera: camera)
         self.camera = camera
         self.motionDetector = motionDetector
+        motionDetector.compensatesCameraMotion = config.cameraMount == .handheld
         self.engine = StarterEngine(player: player, movementDetector: motionDetector)
         
         engine.onRunEnded = { [weak self] in

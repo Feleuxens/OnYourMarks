@@ -287,4 +287,57 @@ struct CameraControllerTests {
 
         #expect(statistics.delivered > 0)
     }
+
+    /// What the camera-motion compensation of the handheld mode costs on
+    /// top of pose detection, and what it measures on a phone that is held.
+    @Test(.enabled(if: cameraRequested))
+    func cameraMotionCompensationThroughput() async throws {
+        let camera = CameraController()
+        let tracker = PoseTracker()
+        let estimator = CameraMotionEstimator()
+        let durations = Mutex<[TimeInterval]>([])
+        let offsets = Mutex<[CGPoint]>([])
+
+        camera.setFrameHandler { frame in
+            _ = tracker.poses(in: frame)
+            let began = CACurrentMediaTime()
+            let offset = estimator.offset(in: frame)
+            durations.withLock { $0.append(CACurrentMediaTime() - began) }
+            offsets.withLock { $0.append(offset) }
+        }
+
+        try #require(camera.configureIfNeeded())
+        camera.start()
+        try await Task.sleep(for: .seconds(2))
+
+        camera.setMode(.precision)
+        try await Task.sleep(for: .seconds(1))
+        durations.withLock { $0.removeAll() }
+        offsets.withLock { $0.removeAll() }
+        _ = camera.currentStatistics()
+        camera.setMode(.idle)
+        camera.setMode(.precision)
+        try await Task.sleep(for: .seconds(3))
+
+        let statistics = camera.currentStatistics()
+        camera.stop()
+
+        let sorted = durations.withLock { $0.sorted() }
+        let median = try #require(sorted.isEmpty ? nil : sorted[sorted.count / 2])
+        let largest = offsets.withLock { $0.map { hypot($0.x, $0.y) }.max() ?? 0 }
+
+        Attachment.record(
+            """
+            analysed with compensation: \(statistics.deliveredFrameRate ?? 0) fps (\(statistics.delivered) frames)
+            dropped: \(statistics.dropped) (\(statistics.droppedLate) late), \
+            longest gap \(statistics.longestGap * 1000) ms
+            image registration: median \(median * 1000) ms, max \((sorted.last ?? 0) * 1000) ms
+            largest measured shift: \(largest * 100) % of the picture
+            pressure: \(camera.pressure)
+            """,
+            named: "Camera motion compensation"
+        )
+
+        #expect(statistics.delivered > 0)
+    }
 }
