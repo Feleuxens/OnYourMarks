@@ -142,6 +142,71 @@ struct ReadinessTests {
     }
     
     @Test
+    func losingReadinessWhileTheGunIsPendingTakesItBack() async {
+        let (engine, player, detector, config) = makeEngine(holdTime: 10)
+        
+        engine.start(config: config)
+        await waitUntil { player.pendingSchedule != nil }
+        
+        // Not reported as unsteady: e.g. an athlete back in view, still moving.
+        detector.setReady(false)
+        await waitUntil { player.pendingSchedule == nil }
+        
+        #expect(kinds(engine).contains(.gunCancelled))
+        #expect(!kinds(engine).contains(.athleteUnsteady(nil)))
+        #expect(detector.resettled.isEmpty)
+        #expect(engine.isRunning)
+        #expect(engine.athleteResults.isEmpty)
+        
+        await settle()
+        #expect(player.scheduleRequests.count == 1)
+        
+        detector.setReady(true)
+        await waitUntil { player.scheduleRequests.count == 2 }
+        
+        #expect(player.pendingSchedule != nil)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func afterADisturbanceTheGunKeepsItsDistance() async throws {
+        // A hold much shorter than the least one after a disturbance.
+        let (engine, player, detector, config) = makeEngine(holdTime: 0.3)
+        
+        engine.start(config: config)
+        await waitUntil { player.pendingSchedule != nil }
+        
+        // Still again at once, as the fake is.
+        detector.emitUnsteady(at: CACurrentMediaTime())
+        let stillAgain = CACurrentMediaTime()
+        await waitUntil { player.scheduleRequests.count == 2 }
+        
+        let requested = try #require(player.scheduleRequests.last?.seconds)
+        #expect(requested >= stillAgain + engine.minimumHoldAfterDisturbance)
+        #expect(requested < stillAgain + engine.minimumHoldAfterDisturbance + 0.2)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func aLongerHoldIsKeptAfterADisturbance() async throws {
+        let (engine, player, detector, config) = makeEngine(holdTime: 10)
+        
+        engine.start(config: config)
+        await waitUntil { player.pendingSchedule != nil }
+        
+        detector.emitUnsteady(at: CACurrentMediaTime())
+        let stillAgain = CACurrentMediaTime()
+        await waitUntil { player.scheduleRequests.count == 2 }
+        
+        let requested = try #require(player.scheduleRequests.last?.seconds)
+        #expect(requested >= stillAgain + 10)
+        
+        engine.abort()
+    }
+    
+    @Test
     func theStartIsGivenUpAfterTooManyRestarts() async {
         let (engine, player, detector, config) = makeEngine(holdTime: 10)
         

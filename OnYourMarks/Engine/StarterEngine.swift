@@ -78,9 +78,22 @@ final class StarterEngine {
     /// start is given up instead of holding the field any longer.
     static let maximumHoldRestarts = 3
     
+    /// The least time between the athletes becoming still again and the
+    /// gun, after the gun was taken back. Whoever has just moved needs a
+    /// moment to be set again, however short the configured hold is: a gun
+    /// right on top of the movement draws a false start. Reasoned, not
+    /// measured: the shortest hold a starter would give.
+    var minimumHoldAfterDisturbance: TimeInterval = 1
+    
     /// The sleep the sequence is in while it waits for the athletes or for
     /// the gun; cancelled to wake it early.
     private var wakeableSleep: Task<Void, Never>?
+    
+    /// A wake-up that found the sequence between two sleeps. It ends the
+    /// next wakeable sleep at once instead of being lost.
+    private var wakeRequested = false
+    /// Whether the last wakeable sleep was ended by a wake-up.
+    private var wasWokenEarly = false
     
     /// Set when an athlete became unsteady while the gun was pending.
     private var holdWasDisturbed = false
@@ -144,6 +157,8 @@ final class StarterEngine {
         athleteResults = []
         firstFalseStart = nil
         holdWasDisturbed = false
+        wakeRequested = false
+        wasWokenEarly = false
         monitoringActive = false
         precisionWindowActive = false
         recordsVideo = config.recordsVideo
@@ -234,9 +249,16 @@ final class StarterEngine {
         case .trackingChanged(let change):
             handleTrackingChange(change)
             
-        case .readinessChanged:
+        case .readinessChanged(let ready):
+            // An athlete who stopped being ready without being reported
+            // unsteady, e.g. one who came back into view still moving,
+            // takes a pending gun back all the same.
+            if !ready {
+                disturbHold()
+            }
+            
             // Wakes the wait for readiness; it looks at the detector itself.
-            wakeableSleep?.cancel()
+            wakeSequence()
             
         case .athletesTracked(let frame):
             // Also after the run: the recorder may still be showing how
@@ -594,7 +616,8 @@ final class StarterEngine {
             // not be predictable from the moment the athletes became still.
             // On the audio clock, so it ends exactly as scheduled however
             // late this task wakes up.
-            let requested = MonotonicTimestamp(seconds: clock.now().seconds + duration)
+            let hold = restarts == 0 ? duration : max(duration, minimumHoldAfterDisturbance)
+            let requested = MonotonicTimestamp(seconds: clock.now().seconds + hold)
             
             guard let gun = player.schedule(.go, at: requested) else {
                 return .failed(String(localized: "The start signal could not be played."))
@@ -643,10 +666,21 @@ final class StarterEngine {
         // They have to become still again before the gun is armed anew.
         movementDetector.resettle(observation.athleteID)
         
-        if scheduledGun != nil {
-            holdWasDisturbed = true
-            wakeableSleep?.cancel()
-        }
+        disturbHold()
+    }
+    
+    /// Takes a pending gun back: the hold begins again once everyone is still.
+    private func disturbHold() {
+        guard state == .waitForStart, gunTime == nil, scheduledGun != nil else { return }
+        
+        holdWasDisturbed = true
+        wakeSequence()
+    }
+    
+    /// Ends the wakeable sleep the sequence is in, or the next one it begins.
+    private func wakeSequence() {
+        wakeRequested = true
+        wakeableSleep?.cancel()
     }
     
     private func runPreflight() async throws {
@@ -699,8 +733,8 @@ final class StarterEngine {
         if windowStart <= deadline {
             guard await sleep(until: windowStart, wakeable: wakeable) else { return false }
             
-            // Woken early: not the window's time yet.
-            guard !wakeable || clock.now() >= windowStart else { return true }
+            // Woken early: the caller looks at what changed first.
+            guard !(wakeable && wasWokenEarly) else { return true }
             
             beginPrecisionWindow()
         }
@@ -716,6 +750,12 @@ final class StarterEngine {
     /// False if cancelled. A wakeable sleep also ends when `wakeableSleep`
     /// is cancelled, and is then still true.
     private func sleep(until time: MonotonicTimestamp, wakeable: Bool = false) async -> Bool {
+        if wakeable, wakeRequested {
+            wakeRequested = false
+            wasWokenEarly = true
+            return !Task.isCancelled
+        }
+        
         let seconds = max(0, time.seconds - clock.now().seconds)
         let sleeper = Task { _ = try? await Task.sleep(for: .seconds(seconds)) }
         
@@ -731,6 +771,8 @@ final class StarterEngine {
         
         if wakeable {
             wakeableSleep = nil
+            wasWokenEarly = wakeRequested
+            wakeRequested = false
         }
         
         return !Task.isCancelled
