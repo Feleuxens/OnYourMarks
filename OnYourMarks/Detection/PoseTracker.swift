@@ -7,7 +7,7 @@ import Vision
 
 /// Finds the bodies in a frame and their joints.
 ///
-/// Not thread-safe: use it from one queue only, here the capture queue.
+/// Not thread-safe: use it from one queue only, here the pose queue.
 nonisolated final class PoseTracker: @unchecked Sendable {
     static let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] = [
         .root, .neck,

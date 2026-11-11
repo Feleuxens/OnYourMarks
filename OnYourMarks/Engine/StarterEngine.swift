@@ -204,6 +204,9 @@ final class StarterEngine {
         case .movement(let observation):
             handleMovement(observation)
             
+        case .onsetRefined(let refinement):
+            handleRefinement(refinement)
+            
         case .unsteady(let observation):
             handleUnsteady(observation)
             
@@ -249,9 +252,10 @@ final class StarterEngine {
         
         let position = athleteID.flatMap { roster?.position(of: $0) }
         
-        // For now movementTime comes from CMSampleBuffer timestamp
-        // Todo for later will map capture timestamps
-        let movementTime = TimeEstimate.exact(observation.time)
+        // An interval that ends with the frame that made the movement
+        // certain. Judging by its late end keeps the live decision
+        // conservative: a false start is only called if even that is too early.
+        let movementTime = observation.onset
         
         record(
             .movementObserved(observation.quality),
@@ -271,8 +275,14 @@ final class StarterEngine {
             )
             
             conclude(
-                AthleteStartResult(athleteID: athleteID, position: position, reaction: nil, decision: decision),
-                at: movementTime
+                AthleteStartResult(
+                    athleteID: athleteID,
+                    position: position,
+                    movement: movementTime,
+                    reaction: nil,
+                    decision: decision,
+                    trackingQuality: observation.quality
+                )
             )
             return
         }
@@ -302,18 +312,103 @@ final class StarterEngine {
         )
         
         conclude(
-            AthleteStartResult(athleteID: athleteID, position: position, reaction: reaction, decision: decision),
-            at: movementTime
+            AthleteStartResult(
+                athleteID: athleteID,
+                position: position,
+                movement: movementTime,
+                reaction: reaction,
+                decision: decision,
+                trackingQuality: observation.quality
+            )
         )
+    }
+    
+    /// Takes in a closer look at when an athlete's movement began. It can
+    /// turn a result into a false start or clear it, but it never recalls:
+    /// by now the athletes are running, and this app is for training, where
+    /// a wrong recall is worse than a missed one.
+    private func handleRefinement(_ refinement: OnsetRefinement) {
+        guard isRunning,
+              let index = athleteResults.firstIndex(where: { $0.athleteID == refinement.athleteID }),
+              !athleteResults[index].isRefined else {
+            return
+        }
+        
+        let live = athleteResults[index]
+        
+        record(
+            .movementOnsetRefined(refinement),
+            at: refinement.onset,
+            source: movementDetector.source,
+            athleteID: refinement.athleteID
+        )
+        
+        // Before the gun the decision doesn't hang on the exact moment.
+        guard let gunTime, live.reaction != nil, let profile = currentSession?.profile else {
+            athleteResults[index] = AthleteStartResult(
+                athleteID: live.athleteID,
+                position: live.position,
+                movement: refinement.onset,
+                reaction: live.reaction,
+                decision: live.decision,
+                trackingQuality: live.trackingQuality,
+                isRefined: true
+            )
+            return
+        }
+        
+        let reaction = refinement.onset.duration(since: gunTime)
+        let decision = decisionEngine.qualify(
+            decisionEngine.evaluateReaction(reaction, profile: profile),
+            by: live.trackingQuality
+        )
+        
+        athleteResults[index] = AthleteStartResult(
+            athleteID: live.athleteID,
+            position: live.position,
+            movement: refinement.onset,
+            reaction: reaction,
+            decision: decision,
+            trackingQuality: live.trackingQuality,
+            isRefined: true
+        )
+        
+        record(
+            .reactionRefined(reaction),
+            at: refinement.onset,
+            source: movementDetector.source,
+            athleteID: refinement.athleteID
+        )
+        
+        logger.info(
+            """
+            Refined reaction\(Self.description(position: live.position), privacy: .public) \
+            \(reaction.best * 1000, format: .fixed(precision: 1)) ms \
+            (\(reaction.earliest * 1000, format: .fixed(precision: 1)) to \
+            \(reaction.latest * 1000, format: .fixed(precision: 1)) ms, \
+            \(refinement.droppedFrames) frames dropped): \
+            \(String(describing: decision), privacy: .public)
+            """
+        )
+        
+        if decision != live.decision {
+            record(
+                .decisionRevised(decision),
+                at: refinement.onset,
+                source: .system,
+                athleteID: refinement.athleteID
+            )
+        }
     }
     
     /// Stores one athlete's result and acts on it: a false start recalls the
     /// field, anything else lets the others go on being watched.
-    private func conclude(_ result: AthleteStartResult, at time: TimeEstimate) {
+    private func conclude(_ result: AthleteStartResult) {
+        let time = result.movement
         athleteResults.append(result)
         
         if result.decision == .definiteFalseStart, firstFalseStart == nil {
-            firstFalseStart = time.best
+            firstFalseStart = time.latest
         }
         
         record(

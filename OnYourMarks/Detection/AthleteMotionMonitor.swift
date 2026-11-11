@@ -21,6 +21,12 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         stability.mapValues { $0.phase }
     }
 
+    /// The part of the picture each stable athlete takes up at rest, for
+    /// watching it frame by frame. An athlete who has to settle again has none.
+    var regions: [AthleteID: CGRect] {
+        stability.compactMapValues { $0.restingPose.flatMap(MotionSampler.region(around:)) }
+    }
+
     /// Whether every athlete that can be seen holds still. A hidden athlete
     /// can't be judged and doesn't hold up the start; neither does an empty
     /// roster.
@@ -108,7 +114,12 @@ nonisolated struct AthleteMotionMonitor: Sendable {
             }
 
             let event = stability[athlete.id]?.process(joints, aspectRatio: athlete.pose.aspectRatio, at: time)
-            let observation = MovementObservation(time: time, athleteID: athlete.id, quality: athlete.quality)
+            let observation = MovementObservation(
+                time: time,
+                onset: stability[athlete.id]?.onset,
+                athleteID: athlete.id,
+                quality: athlete.quality
+            )
 
             switch event {
             case .started:

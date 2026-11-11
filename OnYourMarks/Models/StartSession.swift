@@ -78,6 +78,17 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     
     case reactionMeasured(DurationEstimate)
     
+    /// The beginning of a movement was looked up frame by frame; the event
+    /// time is the refined beginning.
+    case movementOnsetRefined(OnsetRefinement)
+    
+    /// The reaction that follows from the refined beginning.
+    case reactionRefined(DurationEstimate)
+    
+    /// The refined reaction is judged differently from the live one. Too
+    /// late for a recall: the athletes are running.
+    case decisionRevised(StartDecision)
+    
     case decision(StartDecision)
     
     case sessionEnded(StartSessionOutcome)

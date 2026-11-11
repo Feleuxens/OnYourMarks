@@ -33,10 +33,17 @@ struct SettingsView: View {
                         Text("Handheld").tag(CameraMount.handheld)
                     }
                     .accessibilityIdentifier("cameraMountPicker")
+                    
+                    Picker("Frame rate", selection: $vm.config.frameRate) {
+                        ForEach(CameraFrameRate.allCases, id: \.self) { frameRate in
+                            Text("\(frameRate.rawValue) fps").tag(frameRate)
+                        }
+                    }
+                    .accessibilityIdentifier("frameRatePicker")
                 } header: {
                     Text("Camera")
                 } footer: {
-                    Text("Handheld compensates for small movements of the camera. A tripod is more precise.")
+                    Text("Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used.")
                 }
                 
                 Section("Start sequence (block)") {

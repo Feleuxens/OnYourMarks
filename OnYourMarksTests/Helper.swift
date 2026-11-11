@@ -281,13 +281,45 @@ final class FakeMovementDetector: MovementDetector {
         precisionEndCount += 1
     }
     
+    /// A movement made certain at `time`. Unless `since` says when the
+    /// athlete was last seen at rest, it began exactly then.
     func emitMovement(
         at time: TimeInterval,
+        since: TimeInterval? = nil,
         athlete: AthleteID? = nil,
         quality: TrackingQuality? = nil
     ) {
+        let onset = since.map {
+            TimeEstimate(
+                best: MonotonicTimestamp(seconds: ($0 + time) / 2),
+                earliest: MonotonicTimestamp(seconds: $0),
+                latest: MonotonicTimestamp(seconds: time)
+            )
+        }
+        
         onEvent?(
-            .movement(MovementObservation(time: MonotonicTimestamp(seconds: time), athleteID: athlete, quality: quality))
+            .movement(
+                MovementObservation(
+                    time: MonotonicTimestamp(seconds: time), onset: onset, athleteID: athlete, quality: quality
+                )
+            )
+        )
+    }
+    
+    /// The beginning of a reported movement, narrowed down to two frames.
+    func emitRefinement(from earliest: TimeInterval, to latest: TimeInterval, athlete: AthleteID, droppedFrames: Int = 0) {
+        onEvent?(
+            .onsetRefined(
+                OnsetRefinement(
+                    athleteID: athlete,
+                    onset: TimeEstimate(
+                        best: MonotonicTimestamp(seconds: (earliest + latest) / 2),
+                        earliest: MonotonicTimestamp(seconds: earliest),
+                        latest: MonotonicTimestamp(seconds: latest)
+                    ),
+                    droppedFrames: droppedFrames
+                )
+            )
         )
     }
     

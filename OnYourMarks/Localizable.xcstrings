@@ -14,6 +14,16 @@
         }
       }
     },
+    "%lld fps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld fps"
+          }
+        }
+      }
+    },
     "%lld ms ± %lld ms" : {
       "localizations" : {
         "de" : {
@@ -60,6 +70,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatisch"
+          }
+        }
+      }
+    },
+    "Before the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vor dem Schuss"
           }
         }
       }
@@ -234,6 +254,16 @@
         }
       }
     },
+    "Frame rate" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildrate"
+          }
+        }
+      }
+    },
     "Handheld" : {
       "localizations" : {
         "de" : {
@@ -244,12 +274,12 @@
         }
       }
     },
-    "Handheld compensates for small movements of the camera. A tripod is more precise." : {
+    "Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„Aus der Hand“ gleicht kleine Bewegungen der Kamera aus. Mit Stativ ist die Messung genauer."
+            "value" : "„Aus der Hand“ gleicht kleine Bewegungen der Kamera aus. Mit Stativ ist die Messung genauer. Eine höhere Bildrate misst eine Bewegung feiner, braucht aber mehr Licht; erreicht die Kamera sie nicht, wird ihre schnellste Rate verwendet."
           }
         }
       }

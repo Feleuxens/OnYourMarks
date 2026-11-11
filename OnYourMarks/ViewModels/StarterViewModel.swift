@@ -15,6 +15,7 @@ class StarterViewModel {
             configStore.save(config)
             player.theme = config.soundTheme
             motionDetector.compensatesCameraMotion = config.cameraMount == .handheld
+            camera.setPrecisionFrameRate(Double(config.frameRate.rawValue))
             
             if config.audioOutput != oldValue.audioOutput {
                 player.output = config.audioOutput
@@ -102,6 +103,12 @@ class StarterViewModel {
         engine.athleteResults.filter { $0.decision == .definiteFalseStart }
     }
     
+    /// What every athlete that moved in the current or last start did,
+    /// in the order of their numbers; a movement without an athlete last.
+    var reactions: [AthleteStartResult] {
+        engine.athleteResults.sorted { ($0.position ?? .max) < ($1.position ?? .max) }
+    }
+    
     init(
         configStore: ConfigStore? = nil,
         calibrationStore: CalibrationStore? = nil,
@@ -130,6 +137,7 @@ class StarterViewModel {
         self.camera = camera
         self.motionDetector = motionDetector
         motionDetector.compensatesCameraMotion = config.cameraMount == .handheld
+        camera.setPrecisionFrameRate(Double(config.frameRate.rawValue))
         self.engine = StarterEngine(player: player, movementDetector: motionDetector)
         
         engine.onRunEnded = { [weak self] in

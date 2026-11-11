@@ -283,4 +283,50 @@ struct AthleteStabilityTests {
         #expect(feed(&stability, [:], for: 0.5, from: &now).isEmpty)
         #expect(stability.phase == .stable)
     }
+
+    @Test
+    func theBeginningReachesFromTheLastRestingFrameToTheCrossing() throws {
+        var (stability, now) = stable()
+
+        _ = feed(&stability, body(), for: 5 * frame, from: &now)
+        let lastStill = now
+
+        // Out of the tolerance for a few frames, then over the threshold.
+        _ = feed(&stability, body(moving: [.hands], dy: 0.2), for: 3 * frame, from: &now)
+        let departed = lastStill + frame
+        #expect(stability.onset == nil)
+
+        #expect(feed(&stability, body(moving: [.hands], dy: 0.4), for: frame, from: &now) == [.started])
+
+        let onset = try #require(stability.onset)
+        #expect(abs(onset.earliest.seconds - lastStill) < 0.000_001)
+        #expect(abs(onset.best.seconds - departed) < 0.000_001)
+        #expect(abs(onset.latest.seconds - now) < 0.000_001)
+    }
+
+    @Test
+    func aSuddenCrossingBeganAfterThePreviousFrame() throws {
+        var (stability, now) = stable()
+        let lastStill = now
+
+        #expect(feed(&stability, body(moving: [.hands], dy: 0.5), for: frame, from: &now) == [.started])
+
+        let onset = try #require(stability.onset)
+        #expect(abs(onset.earliest.seconds - lastStill) < 0.000_001)
+        #expect(abs(onset.latest.seconds - now) < 0.000_001)
+        #expect(onset.best == onset.latest)
+    }
+
+    @Test
+    func theRestingPoseIsKnownOnceStable() {
+        var stability = AthleteStability(profile: .block)
+        #expect(stability.restingPose == nil)
+
+        var now: TimeInterval = 0
+        _ = feed(&stability, body(), for: MotionProfile.block.settleDuration + 3 * frame, from: &now)
+        #expect(stability.restingPose?.count == body().count)
+
+        stability.resettle()
+        #expect(stability.restingPose == nil)
+    }
 }

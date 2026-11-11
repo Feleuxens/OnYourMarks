@@ -603,4 +603,28 @@ struct AthleteMotionMonitorTests {
         #expect(scene.monitor.roster == nil)
         #expect(!scene.monitor.isReady)
     }
+
+    @Test
+    func stableAthletesHaveARegionToWatchAndMovementsCarryTheirBeginning() throws {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+        #expect(scene.monitor.regions.isEmpty)
+
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+
+        let region = try #require(scene.monitor.regions[athletes[0].id])
+        #expect(region.contains(CGPoint(x: 0.2, y: 0.5)))
+        #expect(!region.contains(CGPoint(x: 0.6, y: 0.5)))
+        #expect(scene.monitor.regions.count == 2)
+
+        let lastStill = scene.now
+        let movement = try #require(scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6)]).movements.first)
+
+        #expect(movement.onset.earliest == time(lastStill))
+        #expect(movement.onset.latest == movement.time)
+
+        // Settling again means a new place to watch.
+        scene.monitor.resettle(athletes[1].id)
+        #expect(scene.monitor.regions[athletes[1].id] == nil)
+    }
 }

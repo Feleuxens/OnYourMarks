@@ -58,6 +58,11 @@ struct StarterView: View {
                         .padding(.bottom, 8)
                     }
                     
+                    if !vm.reactions.isEmpty {
+                        ReactionTimes(results: vm.reactions)
+                            .padding(.top, 8)
+                    }
+                    
                     Spacer()
                     
                     if let output = vm.uncalibratedWirelessOutput {

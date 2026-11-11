@@ -111,6 +111,7 @@ private nonisolated func < (lhs: [Double], rhs: [Double]) -> Bool {
 
 nonisolated enum CameraFrameRatePolicy {
     static let idle: Double = 15
+    /// The precision rate unless another one is asked for.
     static let precision: Double = 120
 
     /// Idle rate while the system asks for throttling.
@@ -118,7 +119,11 @@ nonisolated enum CameraFrameRatePolicy {
 
     /// The precision rate is never throttled: a start in progress is worth
     /// more than the little heat a few seconds save.
-    static func frameRate(for mode: CameraMode, pressure: CameraPressureLevel) -> Double {
+    static func frameRate(
+        for mode: CameraMode,
+        pressure: CameraPressureLevel,
+        precision: Double = precision
+    ) -> Double {
         switch mode {
         case .precision:
             precision

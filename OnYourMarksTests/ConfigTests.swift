@@ -74,6 +74,21 @@ struct ConfigTests {
     }
 
     @Test
+    func frameRateDefaultsTo120AndSurvivesUnknownValues() throws {
+        let old = try JSONDecoder().decode(StartConfig.self, from: Data(#"{"blockTimeToSet": 5}"#.utf8))
+        #expect(old.frameRate == .fps120)
+
+        let unknown = try JSONDecoder().decode(StartConfig.self, from: Data(#"{"frameRate": 90}"#.utf8))
+        #expect(unknown.frameRate == .fps120)
+
+        var config = StartConfig.standard
+        config.frameRate = .fps240
+
+        let restored = try JSONDecoder().decode(StartConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.frameRate == .fps240)
+    }
+
+    @Test
     func storeRoundTripsConfig() {
         let (store, _) = makeStore()
 

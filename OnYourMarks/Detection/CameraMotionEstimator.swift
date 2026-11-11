@@ -12,7 +12,7 @@ import Vision
 /// A first, simple compensation: translation only, no rotation or zoom, and
 /// athletes filling much of the picture pull the estimate towards themselves.
 ///
-/// Not thread-safe: use it from one queue only, here the capture queue.
+/// Not thread-safe: use it from one queue only, here the pose queue.
 nonisolated final class CameraMotionEstimator: @unchecked Sendable {
     /// A shift beyond this share of the picture is not a hand's tremor but
     /// a pan or a failed measurement; either way nothing to correct by.

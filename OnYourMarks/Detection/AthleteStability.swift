@@ -48,6 +48,24 @@ nonisolated struct AthleteStability: Sendable {
     private var unsteadyReported = false
     private var hasStarted = false
 
+    /// The last frame, and the last one that showed the athlete at rest.
+    private var lastFrameTime: MonotonicTimestamp?
+    private var lastStillTime: MonotonicTimestamp?
+
+    /// When the movement began, as far as poses can tell; set with `.started`.
+    ///
+    /// It began after the last frame that showed the athlete at rest and
+    /// had certainly begun in the frame that crossed the threshold. The
+    /// best guess is the first frame outside the still tolerance. A
+    /// movement still inside the tolerance can't be told from rest, so the
+    /// true beginning may lie a little before the interval.
+    private(set) var onset: TimeEstimate?
+
+    /// The resting pose, once stable.
+    var restingPose: Joints? {
+        reference
+    }
+
     init(profile: MotionProfile) {
         self.profile = profile
     }
@@ -92,6 +110,8 @@ nonisolated struct AthleteStability: Sendable {
             CGPoint(x: $0.sum.x / CGFloat($0.count), y: $0.sum.y / CGFloat($0.count))
         }
         phase = .stable
+        lastFrameTime = time
+        lastStillTime = time
         return .becameStable
     }
 
@@ -102,14 +122,22 @@ nonisolated struct AthleteStability: Sendable {
         at time: MonotonicTimestamp
     ) -> Event? {
         let movement = Self.movement(of: joints, from: reference, weights: profile.regionWeights, aspectRatio: aspectRatio)
+        let previousFrame = lastFrameTime ?? time
+        lastFrameTime = time
 
         if movement > profile.movementThreshold {
             hasStarted = true
+            onset = TimeEstimate(
+                best: departedAt ?? time,
+                earliest: min(lastStillTime ?? previousFrame, departedAt ?? time),
+                latest: time
+            )
             return .started
         }
 
         guard movement > profile.stillTolerance else {
             departedAt = nil
+            lastStillTime = time
             return nil
         }
 

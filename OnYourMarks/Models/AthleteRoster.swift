@@ -41,8 +41,13 @@ nonisolated struct AthleteRoster: Equatable, Sendable {
 
 /// A movement one detector saw.
 nonisolated struct MovementObservation: Equatable, Sendable {
-    /// Capture time of the frame that showed the movement, on the host clock.
+    /// Capture time of the frame that made the movement certain, on the
+    /// host clock.
     let time: MonotonicTimestamp
+
+    /// When the movement began. It ends at `time`: by then the athlete had
+    /// certainly moved. How far back it reaches is the detector's knowledge.
+    let onset: TimeEstimate
 
     /// Nil from a detector that doesn't tell athletes apart.
     let athleteID: AthleteID?
@@ -50,11 +55,29 @@ nonisolated struct MovementObservation: Equatable, Sendable {
     /// How well the athlete was tracked in that frame, if the detector knows.
     let quality: TrackingQuality?
 
-    init(time: MonotonicTimestamp, athleteID: AthleteID? = nil, quality: TrackingQuality? = nil) {
+    init(
+        time: MonotonicTimestamp,
+        onset: TimeEstimate? = nil,
+        athleteID: AthleteID? = nil,
+        quality: TrackingQuality? = nil
+    ) {
         self.time = time
+        self.onset = onset ?? .exact(time)
         self.athleteID = athleteID
         self.quality = quality
     }
+}
+
+/// A closer look at when a movement began, found after the movement was
+/// reported. It can change what is known about a start, but never recalls one.
+nonisolated struct OnsetRefinement: Equatable, Sendable {
+    let athleteID: AthleteID
+
+    /// Between two frames that follow each other.
+    let onset: TimeEstimate
+
+    /// Frames missing between those two; they have widened the interval.
+    let droppedFrames: Int
 }
 
 /// An athlete on the roster was hidden, lost or found again.
@@ -71,7 +94,14 @@ nonisolated struct AthleteStartResult: Equatable, Sendable {
     let athleteID: AthleteID?
     /// The athlete's position on the roster.
     let position: Int?
+    /// When the movement began.
+    let movement: TimeEstimate
     /// Nil for a movement before the gun.
     let reaction: DurationEstimate?
     let decision: StartDecision
+    /// How well the athlete was tracked when the movement was seen.
+    let trackingQuality: TrackingQuality?
+    /// Whether the beginning of the movement was looked up frame by frame
+    /// after the live decision.
+    var isRefined = false
 }

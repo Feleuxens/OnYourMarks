@@ -18,6 +18,9 @@ nonisolated enum DetectorEvent: Equatable, Sendable {
     /// starting: swaying, shifting, coming up slowly.
     case unsteady(MovementObservation)
     
+    /// The beginning of a reported movement, found more precisely.
+    case onsetRefined(OnsetRefinement)
+    
     /// An athlete on the roster was hidden, lost or found again.
     case trackingChanged(AthleteTrackingChange)
     

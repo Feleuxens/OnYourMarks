@@ -26,6 +26,10 @@ final class CameraController {
     /// The format chosen at configuration, kept for the session's life.
     private(set) var format: CameraFormatDescriptor?
 
+    /// The rate of the precision mode. The format is chosen to reach it; a
+    /// camera that can't runs at the fastest rate it has.
+    private(set) var precisionFrameRate = CameraFrameRatePolicy.precision
+
     /// Frames of the most recent precision window.
     private(set) var lastPrecisionStatistics: FrameStatistics?
 
@@ -93,7 +97,7 @@ final class CameraController {
         let formats = camera.formats
         let descriptors = formats.map(CameraFormatDescriptor.init)
 
-        guard let index = CameraFormatSelector.bestIndex(among: descriptors, frameRate: CameraFrameRatePolicy.precision) else {
+        guard let index = CameraFormatSelector.bestIndex(among: descriptors, frameRate: precisionFrameRate) else {
             logger.error("The camera offers no formats")
             return
         }
@@ -122,9 +126,27 @@ final class CameraController {
             """
         )
 
-        if chosen.maxFrameRate < CameraFrameRatePolicy.precision {
-            logger.notice("No format reaches \(CameraFrameRatePolicy.precision, format: .fixed(precision: 0)) fps")
+        if chosen.maxFrameRate < precisionFrameRate {
+            logger.notice("No format reaches \(self.precisionFrameRate, format: .fixed(precision: 0)) fps")
         }
+    }
+
+    /// Changes the precision rate. A configured camera picks its format
+    /// anew, which interrupts a running stream for a moment, so this is for
+    /// settings, not for a start in progress.
+    func setPrecisionFrameRate(_ frameRate: Double) {
+        guard frameRate != precisionFrameRate else { return }
+
+        precisionFrameRate = frameRate
+
+        guard isConfigured, let device else { return }
+
+        session.beginConfiguration()
+        selectFormat(on: device)
+        session.commitConfiguration()
+
+        applyFrameRate()
+        reportState()
     }
 
     // MARK: - Running
@@ -190,7 +212,7 @@ final class CameraController {
     private func applyFrameRate() {
         guard let device else { return }
 
-        let frameRate = CameraFrameRatePolicy.frameRate(for: mode, pressure: pressure)
+        let frameRate = CameraFrameRatePolicy.frameRate(for: mode, pressure: pressure, precision: precisionFrameRate)
 
         // AVCaptureDevice isn't Sendable; it is only reconfigured on the
         // serial session queue.
@@ -321,7 +343,7 @@ final class CameraController {
         stateReport.transition(
             to: label,
             format: format,
-            frameRate: CameraFrameRatePolicy.frameRate(for: mode, pressure: pressure),
+            frameRate: CameraFrameRatePolicy.frameRate(for: mode, pressure: pressure, precision: precisionFrameRate),
             pressure: pressure,
             droppedFrames: receiver.statistics().dropped
         )

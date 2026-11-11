@@ -308,4 +308,146 @@ struct MultiAthleteStartTests {
         #expect(engine.evaluateMovementBeforeGun(trackingQuality: nil) == .definiteFalseStart)
         #expect(engine.evaluateMovementBeforeGun(trackingQuality: poor) == .uncertain)
     }
+
+    // MARK: - Intervals and refinement
+    
+    @Test
+    func aMovementThatMayHaveBegunTooEarlyIsNotRecalled() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        // Last seen at rest 60 ms after the gun, certainly moving at 120 ms.
+        detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: good)
+        
+        let result = try #require(engine.athleteResults.first)
+        #expect(result.decision == .uncertain)
+        #expect(abs((result.reaction?.earliest ?? 0) - 0.06) < 0.000_001)
+        #expect(abs((result.reaction?.latest ?? 0) - 0.12) < 0.000_001)
+        #expect(!result.isRefined)
+        #expect(engine.state == .start)
+        #expect(player.recallCount == 0)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func aFalseStartFoundAfterwardsIsShownButNotRecalled() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: good)
+        detector.emitRefinement(from: gun + 0.070, to: gun + 0.078, athlete: ids[0], droppedFrames: 1)
+        
+        let result = try #require(engine.athleteResults.first)
+        #expect(engine.athleteResults.count == 1)
+        #expect(result.decision == .definiteFalseStart)
+        #expect(result.isRefined)
+        #expect(abs((result.reaction?.latest ?? 0) - 0.078) < 0.000_001)
+        #expect(result.movement.latest.seconds == gun + 0.078)
+        
+        // The athletes are running: no recall, the start goes on.
+        #expect(engine.state == .start)
+        #expect(player.recallCount == 0)
+        
+        let kinds = events(engine).map { $0.kind }
+        #expect(kinds.contains(.decision(.uncertain)))
+        #expect(kinds.contains(.decisionRevised(.definiteFalseStart)))
+        #expect(kinds.contains { if case .movementOnsetRefined(let refinement) = $0 { refinement.droppedFrames == 1 } else { false } })
+        #expect(kinds.contains { if case .reactionRefined = $0 { true } else { false } })
+        
+        await waitUntil { !engine.isRunning }
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(engine.athleteResults.first?.decision == .definiteFalseStart)
+    }
+    
+    @Test
+    func aRefinementCanClearAnUncertainStart() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        detector.emitMovement(at: gun + 0.15, since: gun + 0.08, athlete: ids[0], quality: good)
+        detector.emitRefinement(from: gun + 0.108, to: gun + 0.116, athlete: ids[0])
+        
+        #expect(engine.athleteResults.first?.decision == .legal)
+        #expect(events(engine).contains { $0.kind == .decisionRevised(.legal) })
+        
+        // Only the first closer look counts.
+        detector.emitRefinement(from: gun + 0.01, to: gun + 0.02, athlete: ids[0])
+        #expect(engine.athleteResults.first?.decision == .legal)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func aRefinementThatAgreesRevisesNothing() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        detector.emitMovement(at: gun + 0.2, since: gun + 0.15, athlete: ids[0], quality: good)
+        detector.emitRefinement(from: gun + 0.160, to: gun + 0.168, athlete: ids[0])
+        
+        #expect(engine.athleteResults.first?.decision == .legal)
+        #expect(engine.athleteResults.first?.isRefined == true)
+        #expect(!events(engine).contains { if case .decisionRevised = $0.kind { true } else { false } })
+        
+        engine.abort()
+    }
+    
+    @Test
+    func aPoorlyTrackedAthleteStaysUncertainAfterRefinement() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: poor)
+        detector.emitRefinement(from: gun + 0.070, to: gun + 0.078, athlete: ids[0])
+        
+        #expect(engine.athleteResults.first?.decision == .uncertain)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func refinementsForUnknownAthletesAndBeforeTheGunChangeNoDecision() async throws {
+        let ids = [AthleteID()]
+        let (engine, _, detector, config) = makeEngine(athletes: ids, holdTime: 10)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        detector.emitRefinement(from: 1, to: 2, athlete: AthleteID())
+        #expect(engine.athleteResults.isEmpty)
+        
+        let now = CACurrentMediaTime()
+        detector.emitMovement(at: now, since: now - 0.05, athlete: ids[0], quality: good)
+        detector.emitRefinement(from: now - 0.03, to: now - 0.022, athlete: ids[0])
+        
+        let result = try #require(engine.athleteResults.first)
+        #expect(result.decision == .definiteFalseStart)
+        #expect(result.reaction == nil)
+        #expect(result.isRefined)
+        #expect(result.movement.latest.seconds == now - 0.022)
+        
+        await waitUntil { !engine.isRunning }
+        #expect(engine.lastSession?.outcome == .falseStart)
+    }
 }

@@ -561,4 +561,66 @@ struct StarterViewModelTests {
         #expect(vm.falseStarts.isEmpty)
         vm.abort()
     }
+
+    @Test
+    @MainActor
+    func reactionsOfTheLatestStartAreExposedUntilTheNextOne() async throws {
+        let vm = makeViewModel(player: FakeSessionPlayer(), timeToStart: 0)
+        #expect(vm.reactions.isEmpty)
+
+        vm.start()
+        await waitUntil { vm.engine.state == .start }
+
+        // Certainly moving 150 ms after now, last seen at rest 20 ms before that.
+        let moved = CACurrentMediaTime() + 0.15
+        vm.motionDetector.onEvent?(
+            .movement(
+                MovementObservation(
+                    time: MonotonicTimestamp(seconds: moved),
+                    onset: TimeEstimate(
+                        best: MonotonicTimestamp(seconds: moved - 0.005),
+                        earliest: MonotonicTimestamp(seconds: moved - 0.02),
+                        latest: MonotonicTimestamp(seconds: moved)
+                    )
+                )
+            )
+        )
+
+        let result = try #require(vm.reactions.first)
+        let reaction = try #require(result.reaction)
+
+        #expect(result.reactionMilliseconds == Int((reaction.best * 1000).rounded()))
+        // The wider side of the interval, rounded up.
+        #expect(result.reactionToleranceMilliseconds == Int(((reaction.best - reaction.earliest) * 1000).rounded(.up)))
+
+        await waitUntil { !vm.isRunning }
+        #expect(vm.reactions.count == 1)
+
+        vm.start()
+        #expect(vm.reactions.isEmpty)
+        vm.abort()
+    }
+
+    @Test
+    func aMovementBeforeTheGunHasNoReactionToShow() {
+        let time = TimeEstimate.exact(MonotonicTimestamp(seconds: 1))
+        let before = AthleteStartResult(
+            athleteID: nil, position: nil, movement: time, reaction: nil, decision: .definiteFalseStart, trackingQuality: nil
+        )
+
+        #expect(before.reactionMilliseconds == nil)
+        #expect(before.reactionToleranceMilliseconds == nil)
+
+        let measured = AthleteStartResult(
+            athleteID: nil,
+            position: nil,
+            movement: time,
+            reaction: DurationEstimate(best: 0.1424, earliest: 0.1382, latest: 0.1466),
+            decision: .legal,
+            trackingQuality: nil
+        )
+
+        #expect(measured.reactionMilliseconds == 142)
+        #expect(measured.reactionToleranceMilliseconds == 5)
+    }
 }

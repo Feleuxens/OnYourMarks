@@ -90,6 +90,12 @@ struct CameraFrameRatePolicyTests {
         #expect(CameraFrameRatePolicy.frameRate(for: .precision, pressure: pressure) == CameraFrameRatePolicy.precision)
     }
 
+    @Test(arguments: [60.0, 120.0, 240.0])
+    func thePrecisionRateIsTheOneAskedFor(rate: Double) {
+        #expect(CameraFrameRatePolicy.frameRate(for: .precision, pressure: .serious, precision: rate) == rate)
+        #expect(CameraFrameRatePolicy.frameRate(for: .idle, pressure: .nominal, precision: rate) == CameraFrameRatePolicy.idle)
+    }
+
     @Test
     func idleRateIsThrottledUnderSeriousPressure() {
         #expect(CameraFrameRatePolicy.frameRate(for: .idle, pressure: .nominal) == CameraFrameRatePolicy.idle)
@@ -339,5 +345,151 @@ struct CameraControllerTests {
         )
 
         #expect(statistics.delivered > 0)
+    }
+
+    /// What each precision rate delivers when every frame is sampled for
+    /// three athletes and pose detection runs beside it on its own queue,
+    /// as in the detector.
+    @Test(.enabled(if: cameraRequested))
+    func samplingAndPoseRatesAtEachFrameRate() async throws {
+        var report = ""
+
+        for rate in CameraFrameRate.allCases {
+            let camera = CameraController()
+            camera.setPrecisionFrameRate(Double(rate.rawValue))
+
+            let tracker = PoseTracker()
+            let poseQueue = DispatchSerialQueue(label: "test.pose")
+            let inbox = Mutex<(isBusy: Bool, waiting: CameraFrame?)>((false, nil))
+            let poseCount = Mutex(0)
+            let samplingDurations = Mutex<[TimeInterval]>([])
+
+            // Three athletes side by side, each a fifth of the picture wide.
+            let regions = [0.1, 0.4, 0.7].map { CGRect(x: $0, y: 0.2, width: 0.2, height: 0.5) }
+
+            camera.setFrameHandler { frame in
+                let began = CACurrentMediaTime()
+                let width = CVPixelBufferGetWidth(frame.pixelBuffer)
+                let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+
+                for region in regions {
+                    _ = MotionSampler.cells(
+                        of: frame.pixelBuffer,
+                        in: MotionSampler.bufferRegion(for: region, bufferWidth: width, bufferHeight: height)
+                    )
+                }
+                samplingDurations.withLock { $0.append(CACurrentMediaTime() - began) }
+
+                // As in the detector: the newest frame waits for the pose queue.
+                let isFree = inbox.withLock { inbox in
+                    guard inbox.isBusy else {
+                        inbox.isBusy = true
+                        return true
+                    }
+
+                    inbox.waiting = frame
+                    return false
+                }
+                guard isFree else { return }
+
+                poseQueue.async {
+                    var next: CameraFrame? = frame
+
+                    while let current = next {
+                        _ = tracker.poses(in: current)
+                        poseCount.withLock { $0 += 1 }
+
+                        next = inbox.withLock { inbox in
+                            defer { inbox.waiting = nil }
+                            inbox.isBusy = inbox.waiting != nil
+                            return inbox.waiting
+                        }
+                    }
+                }
+            }
+
+            try #require(camera.configureIfNeeded())
+            let format = try #require(camera.format)
+            camera.start()
+            try await Task.sleep(for: .seconds(2))
+
+            camera.setMode(.precision)
+            try await Task.sleep(for: .seconds(1))
+            samplingDurations.withLock { $0.removeAll() }
+            poseCount.withLock { $0 = 0 }
+            _ = camera.currentStatistics()
+            camera.setMode(.idle)
+            camera.setMode(.precision)
+            try await Task.sleep(for: .seconds(3))
+
+            let statistics = camera.currentStatistics()
+            let poses = poseCount.withLock { $0 }
+            camera.stop()
+
+            let sorted = samplingDurations.withLock { $0.sorted() }
+            let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+
+            report += """
+            asked for \(rate.rawValue) fps: format \(format.width)x\(format.height) up to \(format.maxFrameRate) fps
+              sampled: \(statistics.deliveredFrameRate ?? 0) fps (\(statistics.delivered) frames), \
+            dropped \(statistics.dropped) (\(statistics.droppedLate) late), longest gap \(statistics.longestGap * 1000) ms
+              sampling three regions: median \(median * 1000) ms, max \((sorted.last ?? 0) * 1000) ms
+              poses beside it: \(Double(poses) / 3) per second
+              pressure: \(camera.pressure)
+
+            """
+
+            #expect(statistics.delivered > 0)
+            // Lets the session let go of the camera before the next one takes it.
+            try await Task.sleep(for: .seconds(2))
+        }
+
+        Attachment.record(report, named: "Sampling and pose rates")
+    }
+
+    /// Changing the precision rate in the settings picks another format
+    /// while the camera runs; each rate has to arrive afterwards.
+    @Test(.enabled(if: cameraRequested))
+    func switchingThePrecisionRateWhileRunning() async throws {
+        let camera = CameraController()
+        let log = FrameLog()
+
+        camera.setFrameHandler { frame in
+            log.frames.withLock { $0.append((frame.timestamp.seconds, CACurrentMediaTime())) }
+        }
+
+        try #require(camera.configureIfNeeded())
+        camera.start()
+        try await Task.sleep(for: .seconds(2))
+
+        var report = ""
+
+        for rate in [240.0, 120, 60, 120] {
+            camera.setPrecisionFrameRate(rate)
+            try await Task.sleep(for: .seconds(1.5))
+            let idle = log.rate(since: CACurrentMediaTime() - 0.8)
+
+            camera.setMode(.precision)
+            try await Task.sleep(for: .seconds(2))
+            let precision = log.rate(since: CACurrentMediaTime() - 1)
+            let statistics = camera.currentStatistics()
+            camera.setMode(.idle)
+
+            let format = try #require(camera.format)
+            report += """
+            \(rate) fps: format \(format.width)x\(format.height) up to \(format.maxFrameRate) fps, \
+            idle \(idle) fps, precision \(precision) fps, dropped \(statistics.dropped)
+
+            """
+
+            #expect(abs(idle - CameraFrameRatePolicy.idle) < 2)
+            #expect(precision > min(rate, format.maxFrameRate) * 0.9)
+        }
+
+        camera.stop()
+        Attachment.record(report, named: "Switching the precision rate")
+
+        // Lets the session let go of the camera before the next test takes it.
+        try await Task.sleep(for: .seconds(2))
     }
 }
