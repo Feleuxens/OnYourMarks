@@ -5,8 +5,10 @@
 //  Created by Felix on 23.08.26.
 //
 import Foundation
+import CoreVideo
 import QuartzCore
 import Testing
+import Vision
 @testable import OnYourMarks
 
 @MainActor
@@ -409,5 +411,144 @@ extension OutputCalibration {
             clickCount: 6,
             date: .now
         )
+    }
+}
+
+/// Notes what the engine asks of a recorder.
+@MainActor
+final class FakeStartRecorder: StartRecorder {
+    /// Whether there is something to record, like a camera that is on.
+    var canRecord = true
+    
+    private(set) var beginCount = 0
+    private(set) var tracking: [TrackingFrame] = []
+    private(set) var ended: [(session: StartSession, results: [AthleteStartResult])] = []
+    
+    func beginRecording() -> Bool {
+        guard canRecord else { return false }
+        
+        beginCount += 1
+        return true
+    }
+    
+    func record(_ frame: TrackingFrame) {
+        tracking.append(frame)
+    }
+    
+    func endRecording(session: StartSession, results: [AthleteStartResult]) {
+        ended.append((session, results))
+    }
+}
+
+/// A camera whose frames the test sends. They arrive on a queue of their
+/// own, as the camera's do: a recorder's work on a frame, like opening the
+/// video encoder, must not happen on the main actor.
+@MainActor
+final class FakeFrameSource: FrameSource {
+    var isDelivering = true
+    private(set) var handler: (@Sendable (CameraFrame) -> Void)?
+    
+    private let queue = DispatchSerialQueue(label: "test.frames")
+    
+    func setRecordingHandler(_ handler: (@Sendable (CameraFrame) -> Void)?) {
+        self.handler = handler
+    }
+    
+    /// Delivers one frame captured at the given host time, if a recorder
+    /// listens, and returns once the recorder has taken it.
+    func deliver(at time: TimeInterval, index: Int = 0) async throws {
+        await deliver(try CameraFrame.synthetic(at: time, index: index))
+    }
+    
+    func deliver(_ frame: CameraFrame) async {
+        guard let handler else { return }
+        
+        await Self.run(handler, with: frame, on: queue)
+    }
+    
+    /// Built outside the main actor: the closure runs on the frame queue.
+    private nonisolated static func run(
+        _ handler: @escaping @Sendable (CameraFrame) -> Void,
+        with frame: CameraFrame,
+        on queue: DispatchSerialQueue
+    ) async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                handler(frame)
+                continuation.resume()
+            }
+        }
+    }
+}
+
+extension CameraFrame {
+    /// A frame in the camera's pixel format, lying on its side like the
+    /// camera's, grey with a brightness that depends on the index.
+    static func synthetic(at time: TimeInterval, index: Int = 0, width: Int = 640, height: Int = 360) throws -> CameraFrame {
+        var created: CVPixelBuffer?
+        CVPixelBufferCreate(
+            nil,
+            width,
+            height,
+            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary] as CFDictionary,
+            &created
+        )
+        let buffer = try #require(created)
+        
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        
+        for (plane, value) in [(0, UInt8(truncatingIfNeeded: 40 + index * 7)), (1, 128)] {
+            let base = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, plane))
+            memset(base, Int32(value), CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) * CVPixelBufferGetHeightOfPlane(buffer, plane))
+        }
+        
+        return CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: time), index: index)
+    }
+}
+
+extension RecordingStore {
+    /// A store in a folder of its own, so tests don't see each other's recordings.
+    static func scratch() -> RecordingStore {
+        let root = FileManager.default.temporaryDirectory.appending(path: "RecordingTests-\(UUID().uuidString)")
+        
+        return RecordingStore(
+            temporaryDirectory: root.appending(path: "Last"),
+            libraryDirectory: root.appending(path: "Library")
+        )
+    }
+}
+
+extension TrackedAthlete {
+    /// An athlete standing upright around the given point of the picture.
+    static func fake(
+        id: AthleteID = AthleteID(),
+        at center: CGPoint = CGPoint(x: 0.5, y: 0.5),
+        time: TimeInterval = 0
+    ) -> TrackedAthlete {
+        TrackedAthlete(
+            id: id,
+            state: .tracked,
+            pose: DetectedPose(
+                joints: [
+                    .neck: CGPoint(x: center.x, y: center.y + 0.1),
+                    .root: CGPoint(x: center.x, y: center.y - 0.1),
+                    .leftWrist: CGPoint(x: center.x - 0.05, y: center.y),
+                ],
+                confidence: 0.9,
+                aspectRatio: 9.0 / 16.0
+            ),
+            lastSeen: MonotonicTimestamp(seconds: time),
+            isVisible: true,
+            quality: TrackingQuality(state: .tracked, jointCoverage: 1, confidence: 0.9, continuity: 1)
+        )
+    }
+}
+
+extension FakeMovementDetector {
+    /// The athletes of one analysed frame.
+    func emitTracking(at time: TimeInterval, athletes: [TrackedAthlete] = []) {
+        onEvent?(.athletesTracked(TrackingFrame(time: MonotonicTimestamp(seconds: time), athletes: athletes)))
     }
 }

@@ -212,10 +212,18 @@ final class PoseMotionDetector: MovementDetector {
             return [event, .onsetRefined(refinement)]
         }
 
+        let trackingFrame = TrackingFrame(
+            time: frame.timestamp,
+            athletes: athletes,
+            phases: phases,
+            cameraOffset: compensates ? cameraOffset : nil
+        )
+
         Task { @MainActor [weak self] in
             guard let self else { return }
 
             onAthletes?(athletes, phases)
+            onEvent?(.athletesTracked(trackingFrame))
 
             // A frame analysed before monitoring ended has nothing to say any more.
             guard tracking.withLock({ $0.monitor.roster != nil }) else { return }

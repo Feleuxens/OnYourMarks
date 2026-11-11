@@ -33,6 +33,7 @@ class StarterViewModel {
     
     let camera: CameraController
     let motionDetector: PoseMotionDetector
+    let recorder: StartRecordingController
     let engine: StarterEngine
     
     var currentSession: StartSession? {
@@ -109,11 +110,19 @@ class StarterViewModel {
         engine.athleteResults.sorted { ($0.position ?? .max) < ($1.position ?? .max) }
     }
     
+    /// The recording of the start whose results are on screen, once its
+    /// files are complete.
+    var reviewableRecording: StartRecording? {
+        guard !isRunning, let last = recorder.last, last.session.id == lastSession?.id else { return nil }
+        return last
+    }
+    
     init(
         configStore: ConfigStore? = nil,
         calibrationStore: CalibrationStore? = nil,
         camera: CameraController? = nil,
         player: AudioSessionPlayer? = nil,
+        recordingStore: RecordingStore? = nil,
         musicResumeDelay: Duration = .seconds(2)
     ) {
         let configStore = configStore ?? ConfigStore()
@@ -138,7 +147,9 @@ class StarterViewModel {
         self.motionDetector = motionDetector
         motionDetector.compensatesCameraMotion = config.cameraMount == .handheld
         camera.setPrecisionFrameRate(Double(config.frameRate.rawValue))
-        self.engine = StarterEngine(player: player, movementDetector: motionDetector)
+        let recorder = StartRecordingController(source: camera, store: recordingStore ?? RecordingStore())
+        self.recorder = recorder
+        self.engine = StarterEngine(player: player, movementDetector: motionDetector, recorder: recorder)
         
         engine.onRunEnded = { [weak self] in
             self?.runEnded()
@@ -316,6 +327,8 @@ class StarterViewModel {
         cameraEnableTask = nil
         
         cameraEnabled = false
+        // No more frames will come; what was recorded is complete.
+        recorder.flush()
         motionDetector.reset()
         camera.stop()
     }

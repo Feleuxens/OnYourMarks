@@ -8,7 +8,7 @@
 import Foundation
 import QuartzCore
 
-nonisolated struct MonotonicTimestamp: Equatable, Comparable, Hashable, Sendable {
+nonisolated struct MonotonicTimestamp: Equatable, Comparable, Hashable, Codable, Sendable {
     let seconds: TimeInterval
     
     static func < (lhs: MonotonicTimestamp, rhs: MonotonicTimestamp) -> Bool {
@@ -20,7 +20,7 @@ nonisolated struct MonotonicTimestamp: Equatable, Comparable, Hashable, Sendable
 ///
 /// If it is exact, then earliest == best == latest,
 /// if not, it gives an interval.
-nonisolated struct TimeEstimate: Equatable, Sendable {
+nonisolated struct TimeEstimate: Equatable, Codable, Sendable {
     let best: MonotonicTimestamp
     let earliest: MonotonicTimestamp
     let latest: MonotonicTimestamp
@@ -51,7 +51,7 @@ nonisolated struct TimeEstimate: Equatable, Sendable {
 
 
 /// An estimated elapsed duration.
-nonisolated struct DurationEstimate: Equatable, Sendable {
+nonisolated struct DurationEstimate: Equatable, Codable, Sendable {
     let best: TimeInterval
     let earliest: TimeInterval
     let latest: TimeInterval

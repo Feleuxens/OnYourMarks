@@ -15,7 +15,7 @@ nonisolated struct AthleteID: Hashable, Codable, Sendable {
     }
 }
 
-nonisolated enum MeasurementSource: Equatable, Hashable, Sendable {
+nonisolated enum MeasurementSource: Equatable, Hashable, Codable, Sendable {
     case system
     case cameraLocal
     case audioLocal
@@ -27,14 +27,14 @@ nonisolated enum MeasurementSource: Equatable, Hashable, Sendable {
     case externalSensor(String)
 }
 
-nonisolated enum StartSessionOutcome: Equatable, Sendable {
+nonisolated enum StartSessionOutcome: Equatable, Codable, Sendable {
     case completed
     case aborted
     case falseStart
     case failed(String)
 }
 
-nonisolated enum StartEventKind: Equatable, Sendable {
+nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     case sessionStarted
     
     case stateChanged(StarterState)
@@ -45,6 +45,11 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     /// The movement detector switched to full speed ahead of the gun.
     case precisionWindowBegan
     case precisionWindowEnded
+    
+    /// The camera's frames are being written to the start's video, from
+    /// the first frame captured after this.
+    case recordingBegan
+    case recordingEnded
     
     /// The silent check before the first command passed.
     case audioPrepared(AudioPreflight)
@@ -94,7 +99,7 @@ nonisolated enum StartEventKind: Equatable, Sendable {
     case sessionEnded(StartSessionOutcome)
 }
 
-nonisolated struct StartEvent: Identifiable, Equatable, Sendable {
+nonisolated struct StartEvent: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     let kind: StartEventKind
     let time: TimeEstimate
@@ -116,7 +121,7 @@ nonisolated struct StartEvent: Identifiable, Equatable, Sendable {
     }
 }
 
-nonisolated struct StartSession: Identifiable, Equatable, Sendable {
+nonisolated struct StartSession: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     
     let startType: StartType

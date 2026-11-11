@@ -48,6 +48,8 @@ nonisolated struct StartConfig: Codable, Sendable {
     var audioOutput: AudioOutput = .automatic
     var cameraMount: CameraMount = .tripod
     var frameRate: CameraFrameRate = .fps120
+    /// Whether a start with the camera on is recorded for the review.
+    var recordsVideo = true
 
     static let standard = StartConfig()
     
@@ -55,7 +57,7 @@ nonisolated struct StartConfig: Codable, Sendable {
     init() {}
     
     private enum CodingKeys: String, CodingKey {
-        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate
+        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate, recordsVideo
 }
     
     init(from decoder: Decoder) throws {
@@ -77,6 +79,7 @@ nonisolated struct StartConfig: Codable, Sendable {
         audioOutput = try container.decodeIfPresent(AudioOutput.self, forKey: .audioOutput) ?? defaults.audioOutput
         cameraMount = try container.decodeIfPresent(CameraMount.self, forKey: .cameraMount) ?? defaults.cameraMount
         frameRate = (try? container.decodeIfPresent(CameraFrameRate.self, forKey: .frameRate)) ?? defaults.frameRate
+        recordsVideo = try container.decodeIfPresent(Bool.self, forKey: .recordsVideo) ?? defaults.recordsVideo
 
         normalize()
     }

@@ -40,10 +40,13 @@ struct SettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("frameRatePicker")
+                    
+                    Toggle("Record starts", isOn: $vm.config.recordsVideo)
+                        .accessibilityIdentifier("recordStartsToggle")
                 } header: {
                     Text("Camera")
                 } footer: {
-                    Text("Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used.")
+                    Text("Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used. A recorded start can be reviewed frame by frame afterwards.")
                 }
                 
                 Section("Start sequence (block)") {

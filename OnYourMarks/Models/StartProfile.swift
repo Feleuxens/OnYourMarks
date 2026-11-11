@@ -9,7 +9,7 @@ import Foundation
 
 
 /// This class sets parameters for the decision engine.
-nonisolated struct StartProfile: Equatable, Sendable {
+nonisolated struct StartProfile: Equatable, Codable, Sendable {
     let startType: StartType
     
     let usesSetCommand: Bool

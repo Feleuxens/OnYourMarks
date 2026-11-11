@@ -16,7 +16,7 @@ import Vision
 nonisolated struct AthleteStability: Sendable {
     typealias Joints = [VNHumanBodyPoseObservation.JointName: CGPoint]
 
-    enum Phase: Equatable, Sendable {
+    enum Phase: Equatable, Codable, Sendable {
         case moving
         /// Still, but not for long enough yet.
         case settling

@@ -7,7 +7,7 @@
 
 import Foundation
 
-nonisolated enum StartDecision: Equatable, Sendable {
+nonisolated enum StartDecision: Equatable, Codable, Sendable {
     /// The entire reaction interval is below the allowed threshold
     case definiteFalseStart
     

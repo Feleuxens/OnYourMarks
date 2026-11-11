@@ -63,6 +63,21 @@ struct StarterView: View {
                             .padding(.top, 8)
                     }
                     
+                    if let recording = vm.reviewableRecording {
+                        NavigationLink {
+                            ReviewView(recording: recording, recorder: vm.recorder)
+                        } label: {
+                            Label("Review start", systemImage: "play.rectangle")
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.black.opacity(0.45), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("reviewButton")
+                    }
+                    
                     Spacer()
                     
                     if let output = vm.uncalibratedWirelessOutput {
@@ -83,6 +98,15 @@ struct StarterView: View {
                 .padding().animation(.easeInOut, value: vm.config.startType)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        RecordingsView(recorder: vm.recorder)
+                    } label: {
+                        Image(systemName: "film.stack").foregroundStyle(Color.graphite.opacity(0.7))
+                    }.disabled(vm.isRunning).opacity(vm.isRunning ? 0.5 : 1).buttonStyle(.plain)
+                    .accessibilityLabel("Recorded starts")
+                    .accessibilityIdentifier("recordingsButton")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SettingsView(vm: vm)

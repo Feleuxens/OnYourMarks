@@ -26,6 +26,10 @@ nonisolated enum DetectorEvent: Equatable, Sendable {
     
     /// The detector's `isReady` changed.
     case readinessChanged(Bool)
+    
+    /// The athletes as one analysed frame showed them. Reported for every
+    /// analysed frame, also outside of monitoring; a recording keeps them.
+    case athletesTracked(TrackingFrame)
 }
 
 protocol MovementDetector: AnyObject {

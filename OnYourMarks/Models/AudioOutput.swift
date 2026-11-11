@@ -16,7 +16,7 @@ nonisolated enum AudioOutput: String, Codable, CaseIterable, Sendable {
 }
 
 /// An output port, as far as calibrations are concerned.
-nonisolated struct OutputRoute: Equatable, Sendable {
+nonisolated struct OutputRoute: Equatable, Codable, Sendable {
     /// Stable per device, e.g. a Bluetooth headphone's address.
     let id: String
     let name: String

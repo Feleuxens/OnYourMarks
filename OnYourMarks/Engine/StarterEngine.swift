@@ -33,6 +33,11 @@ final class StarterEngine {
     private let player: SignalPlayer
     private let movementDetector: MovementDetector
     
+    /// Records the start for the review, if there is one to record with.
+    private let recorder: StartRecorder?
+    private var recordsVideo = false
+    private var isRecording = false
+    
     private let clock: MonotonicClock
     private let decisionEngine: DecisionEngine
     
@@ -98,11 +103,13 @@ final class StarterEngine {
     
     convenience init(
         player: SignalPlayer,
-        movementDetector: MovementDetector
+        movementDetector: MovementDetector,
+        recorder: StartRecorder? = nil
     ) {
         self.init(
             player: player,
             movementDetector: movementDetector,
+            recorder: recorder,
             clock: SystemMonotonicClock(),
             decisionEngine: DecisionEngine()
         )
@@ -111,11 +118,13 @@ final class StarterEngine {
     init(
         player: SignalPlayer,
         movementDetector: MovementDetector,
+        recorder: StartRecorder? = nil,
         clock: MonotonicClock,
         decisionEngine: DecisionEngine
     ) {
         self.player = player
         self.movementDetector = movementDetector
+        self.recorder = recorder
         self.clock = clock
         self.decisionEngine = decisionEngine
         
@@ -137,6 +146,8 @@ final class StarterEngine {
         holdWasDisturbed = false
         monitoringActive = false
         precisionWindowActive = false
+        recordsVideo = config.recordsVideo
+        isRecording = false
         
         let profile = config.startType.profile
         let now = clock.now()
@@ -194,7 +205,17 @@ final class StarterEngine {
         setState(.idle)
         isRunning = false
         
+        let wasRecording = isRecording
+        if wasRecording {
+            isRecording = false
+            record(.recordingEnded, source: .system)
+        }
+        
         finalizeSession(outcome: outcome)
+        
+        if wasRecording, let lastSession {
+            recorder?.endRecording(session: lastSession, results: athleteResults)
+        }
         
         onRunEnded?()
     }
@@ -216,6 +237,11 @@ final class StarterEngine {
         case .readinessChanged:
             // Wakes the wait for readiness; it looks at the detector itself.
             wakeableSleep?.cancel()
+            
+        case .athletesTracked(let frame):
+            // Also after the run: the recorder may still be showing how
+            // the start went on.
+            recorder?.record(frame)
         }
     }
     
@@ -776,6 +802,12 @@ final class StarterEngine {
         
         record(.monitoringStarted, source: .system)
         record(.rosterEstablished(roster), source: movementDetector.source)
+        
+        // From the hold on: a false start can happen from here.
+        if recordsVideo, recorder?.beginRecording() == true {
+            isRecording = true
+            record(.recordingBegan, source: .system)
+        }
         
         logger.info("Roster: \(roster.entries.count) athletes")
     }

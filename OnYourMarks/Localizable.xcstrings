@@ -24,6 +24,26 @@
         }
       }
     },
+    "%lld ms after the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ms nach dem Schuss"
+          }
+        }
+      }
+    },
+    "%lld ms before the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ms vor dem Schuss"
+          }
+        }
+      }
+    },
     "%lld ms ± %lld ms" : {
       "localizations" : {
         "de" : {
@@ -40,6 +60,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ein Startsignal konnte nicht geladen werden."
+          }
+        }
+      }
+    },
+    "A start with the camera on is recorded and can be reviewed here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Start mit eingeschalteter Kamera wird aufgenommen und kann hier angesehen werden."
           }
         }
       }
@@ -194,6 +224,26 @@
         }
       }
     },
+    "Delete" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löschen"
+          }
+        }
+      }
+    },
+    "Delete this start?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diesen Start löschen?"
+          }
+        }
+      }
+    },
     "Detection off" : {
       "localizations" : {
         "de" : {
@@ -220,6 +270,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erlaube den Kamerazugriff in den Einstellungen, um Fehlstarts zu erkennen."
+          }
+        }
+      }
+    },
+    "Export" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportieren"
           }
         }
       }
@@ -254,12 +314,32 @@
         }
       }
     },
+    "Frame %lld of %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bild %1$lld von %2$lld"
+          }
+        }
+      }
+    },
     "Frame rate" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bildrate"
+          }
+        }
+      }
+    },
+    "Go to the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zum Schuss springen"
           }
         }
       }
@@ -274,12 +354,12 @@
         }
       }
     },
-    "Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used." : {
+    "Handheld compensates for small movements of the camera. A tripod is more precise. A higher frame rate times a movement more finely but needs more light; if the camera doesn't reach it, its fastest rate is used. A recorded start can be reviewed frame by frame afterwards." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„Aus der Hand“ gleicht kleine Bewegungen der Kamera aus. Mit Stativ ist die Messung genauer. Eine höhere Bildrate misst eine Bewegung feiner, braucht aber mehr Licht; erreicht die Kamera sie nicht, wird ihre schnellste Rate verwendet."
+            "value" : "„Aus der Hand“ gleicht kleine Bewegungen der Kamera aus. Mit Stativ ist die Messung genauer. Eine höhere Bildrate misst eine Bewegung feiner, braucht aber mehr Licht; erreicht die Kamera sie nicht, wird ihre schnellste Rate verwendet. Einen aufgenommenen Start kannst du danach Bild für Bild ansehen."
           }
         }
       }
@@ -290,6 +370,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iPhone-Lautsprecher"
+          }
+        }
+      }
+    },
+    "Last start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Letzter Start"
           }
         }
       }
@@ -324,12 +414,42 @@
         }
       }
     },
+    "Next frame" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nächstes Bild"
+          }
+        }
+      }
+    },
     "No audio output is available." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Es ist keine Audioausgabe verfügbar."
+          }
+        }
+      }
+    },
+    "No gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Schuss"
+          }
+        }
+      }
+    },
+    "No recorded starts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine aufgenommenen Starts"
           }
         }
       }
@@ -404,6 +524,86 @@
         }
       }
     },
+    "Pause" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause"
+          }
+        }
+      }
+    },
+    "Play" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abspielen"
+          }
+        }
+      }
+    },
+    "Playback speed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abspielgeschwindigkeit"
+          }
+        }
+      }
+    },
+    "Position in the video" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Position im Video"
+          }
+        }
+      }
+    },
+    "Previous frame" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorheriges Bild"
+          }
+        }
+      }
+    },
+    "Reactions measured: %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gemessene Reaktionen: %lld"
+          }
+        }
+      }
+    },
+    "Record starts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starts aufnehmen"
+          }
+        }
+      }
+    },
+    "Recorded starts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufgenommene Starts"
+          }
+        }
+      }
+    },
     "Remove calibration" : {
       "localizations" : {
         "de" : {
@@ -424,12 +624,42 @@
         }
       }
     },
+    "Review start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start ansehen"
+          }
+        }
+      }
+    },
     "s" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "s"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sichern"
+          }
+        }
+      }
+    },
+    "Saved" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gesichert"
           }
         }
       }
@@ -614,12 +844,32 @@
         }
       }
     },
+    "The next start replaces it unless you save it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der nächste Start ersetzt ihn, wenn du ihn nicht sicherst."
+          }
+        }
+      }
+    },
     "The start could not be prepared: %@" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der Start konnte nicht vorbereitet werden: %@"
+          }
+        }
+      }
+    },
+    "The start could not be saved." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Start konnte nicht gesichert werden."
           }
         }
       }

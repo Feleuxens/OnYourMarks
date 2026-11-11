@@ -6,7 +6,7 @@
 import Foundation
 
 /// What the silent check before a start found the audio output to be.
-nonisolated struct AudioPreflight: Equatable, Sendable {
+nonisolated struct AudioPreflight: Equatable, Codable, Sendable {
     /// Hardware sample rate of the output.
     let sampleRate: Double
     let ioBufferDuration: TimeInterval

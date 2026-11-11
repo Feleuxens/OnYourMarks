@@ -8,7 +8,7 @@ import Foundation
 import Vision
 
 /// Parts of the body that move together and matter differently for a start.
-nonisolated enum BodyRegion: CaseIterable, Hashable, Sendable {
+nonisolated enum BodyRegion: CaseIterable, Hashable, Codable, Sendable {
     case torso
     case arms
     case hands
@@ -29,7 +29,7 @@ nonisolated enum BodyRegion: CaseIterable, Hashable, Sendable {
 ///
 /// All values are reasoned first choices, not measurements; a field test
 /// has to confirm them.
-nonisolated struct MotionProfile: Equatable, Sendable {
+nonisolated struct MotionProfile: Equatable, Codable, Sendable {
     /// How much a region's movement counts. A region at 1 triggers when it
     /// moves by the threshold, one at 0.5 has to move twice as far.
     let regionWeights: [BodyRegion: CGFloat]

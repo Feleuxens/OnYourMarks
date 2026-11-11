@@ -110,3 +110,35 @@ nonisolated struct DetectedPose: Equatable, Sendable {
         return CGPoint(x: sum.x / CGFloat(points.count), y: sum.y / CGFloat(points.count))
     }
 }
+
+/// Stored with a recording. Vision's joint names aren't codable, so the
+/// joints are keyed by the names' raw strings.
+nonisolated extension DetectedPose: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case joints, confidence, aspectRatio
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let named = try container.decode([String: CGPoint].self, forKey: .joints)
+
+        self.init(
+            joints: Dictionary(
+                uniqueKeysWithValues: named.map {
+                    (VNHumanBodyPoseObservation.JointName(rawValue: VNRecognizedPointKey(rawValue: $0.key)), $0.value)
+                }
+            ),
+            confidence: try container.decode(Float.self, forKey: .confidence),
+            aspectRatio: try container.decode(CGFloat.self, forKey: .aspectRatio)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        let named = Dictionary(uniqueKeysWithValues: joints.map { ($0.key.rawValue.rawValue, $0.value) })
+
+        try container.encode(named, forKey: .joints)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(aspectRatio, forKey: .aspectRatio)
+    }
+}

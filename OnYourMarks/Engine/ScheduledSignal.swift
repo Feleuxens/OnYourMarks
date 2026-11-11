@@ -23,7 +23,7 @@ nonisolated struct ScheduledSignal: Equatable, Sendable {
 
 /// Everything that turns a render time into the moment a signal is heard.
 /// Kept with the start, so a close decision can be traced back later.
-nonisolated struct SignalTimingBasis: Equatable, Sendable {
+nonisolated struct SignalTimingBasis: Equatable, Codable, Sendable {
     let route: OutputRoute?
 
     /// As reported by the system for the route.

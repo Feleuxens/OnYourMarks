@@ -9,8 +9,8 @@ import Foundation
 ///
 /// Only they can be charged with a false start. Whoever enters the picture
 /// later (a coach, a passer-by) is tracked but not judged.
-nonisolated struct AthleteRoster: Equatable, Sendable {
-    struct Entry: Identifiable, Equatable, Sendable {
+nonisolated struct AthleteRoster: Equatable, Codable, Sendable {
+    struct Entry: Identifiable, Equatable, Codable, Sendable {
         let id: AthleteID
         /// Counted from the left of the picture when the roster was fixed,
         /// starting at 1. It is how a person can tell the athletes apart:
@@ -70,7 +70,7 @@ nonisolated struct MovementObservation: Equatable, Sendable {
 
 /// A closer look at when a movement began, found after the movement was
 /// reported. It can change what is known about a start, but never recalls one.
-nonisolated struct OnsetRefinement: Equatable, Sendable {
+nonisolated struct OnsetRefinement: Equatable, Codable, Sendable {
     let athleteID: AthleteID
 
     /// Between two frames that follow each other.
@@ -89,7 +89,7 @@ nonisolated struct AthleteTrackingChange: Equatable, Sendable {
 }
 
 /// What one athlete did in a start.
-nonisolated struct AthleteStartResult: Equatable, Sendable {
+nonisolated struct AthleteStartResult: Equatable, Codable, Sendable {
     /// Nil from a detector that doesn't tell athletes apart.
     let athleteID: AthleteID?
     /// The athlete's position on the roster.

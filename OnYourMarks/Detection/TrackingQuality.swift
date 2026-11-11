@@ -6,7 +6,7 @@
 import Foundation
 
 /// Where an athlete's track stands.
-nonisolated enum AthleteTrackState: Equatable, Sendable {
+nonisolated enum AthleteTrackState: Equatable, Codable, Sendable {
     /// Seen, but not often enough yet to rule out a spurious detection.
     case tentative
     case tracked
@@ -20,7 +20,7 @@ nonisolated enum AthleteTrackState: Equatable, Sendable {
 ///
 /// A movement is measured against the athlete's earlier pose, so it is only
 /// as good as the certainty that both poses belong to the same, well-seen body.
-nonisolated struct TrackingQuality: Equatable, Sendable {
+nonisolated struct TrackingQuality: Equatable, Codable, Sendable {
     enum Level: Equatable, Sendable {
         case good
         case reduced

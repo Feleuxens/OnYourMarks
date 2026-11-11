@@ -492,4 +492,95 @@ struct CameraControllerTests {
         // Lets the session let go of the camera before the next test takes it.
         try await Task.sleep(for: .seconds(2))
     }
+
+    /// Recording must not cost the analysis its frames: the same stretch at
+    /// the precision rate, once with and once without the video writer.
+    @Test(.enabled(if: cameraRequested))
+    func recordingBesideTheAnalysis() async throws {
+        var report = ""
+
+        for rate in [CameraFrameRate.fps120, .fps240] {
+            for records in [false, true] {
+                let camera = CameraController()
+                camera.setPrecisionFrameRate(Double(rate.rawValue))
+                let detector = PoseMotionDetector(camera: camera)
+                let store = RecordingStore.scratch()
+                let recorder = StartRecordingController(source: camera, store: store, tail: .zero)
+
+                // What the engine does with them during a start.
+                var analysed = 0
+                detector.onEvent = { event in
+                    if case .athletesTracked(let frame) = event {
+                        analysed += 1
+                        recorder.record(frame)
+                    }
+                }
+
+                try #require(camera.configureIfNeeded())
+                camera.start()
+                try await Task.sleep(for: .seconds(1.5))
+                // The first pose request of a process loads the model, which
+                // takes seconds and is not what is measured here.
+                await waitUntil(timeout: .seconds(30)) { analysed > 0 }
+
+                if records {
+                    try #require(recorder.beginRecording())
+                }
+                // A stretch at the idle rate first, as in a hold.
+                try await Task.sleep(for: .seconds(0.5))
+
+                detector.startMonitoring(profile: .block)
+                camera.setMode(.precision)
+                let began = CACurrentMediaTime()
+                try await Task.sleep(for: .seconds(3))
+                let length = CACurrentMediaTime() - began
+
+                let statistics = camera.currentStatistics()
+                let detection = detector.detectionStatistics
+                camera.setMode(.idle)
+                detector.stopMonitoring()
+
+                report += """
+                \(rate.rawValue) fps, \(records ? "recording" : "not recording"):
+                  delivered \(statistics.deliveredFrameRate ?? 0) fps (\(statistics.delivered) frames), \
+                dropped \(statistics.dropped) (\(statistics.droppedLate) late, \(statistics.droppedOutOfBuffers) out of buffers), \
+                longest gap \(statistics.longestGap * 1000) ms
+                  poses: \(Double(detection.analysedFrames) / length) per second
+                  pressure: \(camera.pressure)
+
+                """
+
+                if records {
+                    var session = StartSession(startType: .block, profile: .block, createdAt: MonotonicTimestamp(seconds: began))
+                    session.finish(.completed, at: .exact(MonotonicTimestamp(seconds: CACurrentMediaTime())))
+                    recorder.endRecording(session: session, results: [])
+
+                    await waitUntil(timeout: .seconds(20)) { recorder.last != nil }
+                    let recording = try #require(recorder.last)
+
+                    let inWindow = recording.frameTimes.filter { $0.seconds >= began + 0.5 && $0.seconds <= began + length }
+                    let size = try recorder.videoURL(of: recording).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    let tracking = await recorder.tracking(of: recording)
+
+                    report += """
+                      video: \(recording.frameTimes.count) frames, \(recording.skippedFrames) skipped by the writer, \
+                    \(Double(inWindow.count - 1) / ((inWindow.last?.seconds ?? 0) - (inWindow.first?.seconds ?? 0))) fps in the window, \
+                    \(Double(size) / 1_000_000) MB
+                      tracking frames stored: \(tracking.count)
+
+                    """
+
+                    #expect(recording.skippedFrames < recording.frameTimes.count / 20)
+                    recorder.delete(recording)
+                }
+
+                camera.stop()
+                #expect(statistics.delivered > 0)
+                // Lets the session let go of the camera before the next one takes it.
+                try await Task.sleep(for: .seconds(2))
+            }
+        }
+
+        Attachment.record(report, named: "Recording beside the analysis")
+    }
 }

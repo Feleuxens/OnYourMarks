@@ -11,7 +11,7 @@ import Synchronization
 /// the precision frame rate, watches system pressure and hands every frame,
 /// with its capture time, to whoever analyses it.
 @Observable
-final class CameraController {
+final class CameraController: FrameSource {
     @ObservationIgnored private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
         category: "Camera"
@@ -35,6 +35,10 @@ final class CameraController {
 
     @ObservationIgnored private var isConfigured = false
     @ObservationIgnored private var isStarted = false
+
+    var isDelivering: Bool {
+        isStarted
+    }
     @ObservationIgnored private var device: AVCaptureDevice?
 
     @ObservationIgnored private let videoOutput = AVCaptureVideoDataOutput()
@@ -185,6 +189,11 @@ final class CameraController {
     /// camera drop the frames that arrive meanwhile.
     func setFrameHandler(_ handler: (@Sendable (CameraFrame) -> Void)?) {
         receiver.setHandler(handler)
+    }
+
+    /// Receives every frame after the frame handler, on the capture queue.
+    func setRecordingHandler(_ handler: (@Sendable (CameraFrame) -> Void)?) {
+        receiver.setRecorder(handler)
     }
 
     /// Frames since the mode last changed.
@@ -355,6 +364,7 @@ private nonisolated final class FrameReceiver: NSObject, AVCaptureVideoDataOutpu
     private struct State {
         var statistics = FrameStatistics()
         var handler: (@Sendable (CameraFrame) -> Void)?
+        var recorder: (@Sendable (CameraFrame) -> Void)?
         var nextIndex = 0
     }
 
@@ -369,6 +379,10 @@ private nonisolated final class FrameReceiver: NSObject, AVCaptureVideoDataOutpu
 
     func setHandler(_ handler: (@Sendable (CameraFrame) -> Void)?) {
         state.withLock { $0.handler = handler }
+    }
+
+    func setRecorder(_ recorder: (@Sendable (CameraFrame) -> Void)?) {
+        state.withLock { $0.recorder = recorder }
     }
 
     func statistics() -> FrameStatistics {
@@ -393,19 +407,21 @@ private nonisolated final class FrameReceiver: NSObject, AVCaptureVideoDataOutpu
 
         let timestamp = hostSeconds(of: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
 
-        let (handler, index) = state.withLock { state in
+        let (handler, recorder, index) = state.withLock { state in
             state.statistics.recordDelivered(at: timestamp)
             state.nextIndex += 1
-            return (state.handler, state.nextIndex - 1)
+            return (state.handler, state.recorder, state.nextIndex - 1)
         }
 
-        handler?(
-            CameraFrame(
-                pixelBuffer: pixelBuffer,
-                timestamp: MonotonicTimestamp(seconds: timestamp),
-                index: index
-            )
+        let frame = CameraFrame(
+            pixelBuffer: pixelBuffer,
+            timestamp: MonotonicTimestamp(seconds: timestamp),
+            index: index
         )
+
+        // The analysis first: the recording must not delay a decision.
+        handler?(frame)
+        recorder?(frame)
     }
 
     func captureOutput(

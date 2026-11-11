@@ -9,12 +9,25 @@ import SwiftUI
 /// number the preview shows above them, the time, and how far it may be off.
 struct ReactionTimes: View {
     let results: [AthleteStartResult]
+    /// Marked among the others, where one can be picked.
+    var selected: AthleteID?
+    /// Makes the times tappable.
+    var onSelect: ((AthleteStartResult) -> Void)?
     
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(Array(results.enumerated()), id: \.offset) { _, result in
-                    chip(for: result)
+                    if let onSelect {
+                        Button {
+                            onSelect(result)
+                        } label: {
+                            chip(for: result)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        chip(for: result)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -48,19 +61,16 @@ struct ReactionTimes: View {
         .padding(.vertical, 6)
         .background(.black.opacity(0.45), in: Capsule())
         .overlay {
-            if result.position == nil {
+            if result.athleteID != nil, result.athleteID == selected {
+                Capsule().strokeBorder(.white, lineWidth: 2)
+            } else if result.position == nil {
                 Capsule().strokeBorder(color(for: result.decision), lineWidth: 2)
             }
         }
     }
     
     private func color(for decision: StartDecision) -> Color {
-        switch decision {
-        case .definiteFalseStart: .red
-        case .uncertain: .orange
-        case .legal: .green
-        case .notApplicable: .gray
-        }
+        decision.color
     }
 }
 

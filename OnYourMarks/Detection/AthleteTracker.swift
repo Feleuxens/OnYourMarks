@@ -7,7 +7,7 @@ import CoreGraphics
 import Foundation
 
 /// An athlete as known after one frame.
-nonisolated struct TrackedAthlete: Identifiable, Equatable, Sendable {
+nonisolated struct TrackedAthlete: Identifiable, Equatable, Codable, Sendable {
     let id: AthleteID
     let state: AthleteTrackState
 
