@@ -198,19 +198,21 @@ struct StarterViewModelTests {
     // MARK: - Session deactivation after a run
 
     @Test
-    func completedRunDeactivatesAfterResumeDelay() async {
+    func completedRunDeactivatesAfterResumeDelay() async throws {
         let player = FakeSessionPlayer()
         let vm = makeViewModel(player: player, musicResumeDelay: .milliseconds(200))
 
         vm.start()
         await waitUntil { vm.lastSession?.outcome == .completed }
-        await settle()
-
-        // Music stays paused for a moment after the gun.
-        #expect(player.isSessionActive)
-
         await waitUntil { !player.isSessionActive }
         #expect(player.deactivateCount == 1)
+
+        // Music stays paused for a moment after the gun. Both times were
+        // taken when it happened, so a test that gets its turn late still
+        // sees the distance.
+        let ended = try #require(vm.lastSession?.events.last?.time.best.seconds)
+        let deactivated = try #require(player.deactivatedAt)
+        #expect(deactivated - ended >= 0.2)
     }
 
     @Test

@@ -9,12 +9,22 @@ import QuartzCore
 
 @MainActor
 struct GunSchedulingTests {
+    /// With a clock, the engine and the fakes tell and wait their time by it.
     private func makeEngine(
         holdTime: Double,
-        player: FakeSignalPlayer = FakeSignalPlayer()
+        player: FakeSignalPlayer = FakeSignalPlayer(),
+        clock: ManualClock? = nil
     ) -> (StarterEngine, FakeSignalPlayer, FakeMovementDetector, StartConfig) {
         let detector = FakeMovementDetector()
-        let engine = StarterEngine(player: player, movementDetector: detector)
+        let engine: StarterEngine
+        
+        if let clock {
+            player.clock = clock
+            detector.clock = clock
+            engine = StarterEngine(player: player, movementDetector: detector, clock: clock, decisionEngine: DecisionEngine())
+        } else {
+            engine = StarterEngine(player: player, movementDetector: detector)
+        }
         
         var config = StartConfig.instant
         config.blockTimeToStartMin = holdTime
@@ -33,15 +43,16 @@ struct GunSchedulingTests {
     
     @Test
     func gunIsScheduledWhenHoldBegins() async throws {
-        let (engine, player, _, config) = makeEngine(holdTime: 0.3)
+        let clock = ManualClock()
+        let (engine, player, _, config) = makeEngine(holdTime: 0.3, clock: clock)
         
+        // Nothing before the hold takes time.
         engine.start(config: config)
         await waitUntil { engine.state == .waitForStart }
-        let holdBegan = CACurrentMediaTime()
         
         #expect(player.scheduleRequests.count == 1)
         let requested = try #require(player.scheduleRequests.first)
-        #expect(abs(requested.seconds - (holdBegan + 0.3)) < 0.05)
+        #expect(requested.seconds == clock.now().seconds + 0.3)
         
         engine.abort()
     }
@@ -50,13 +61,17 @@ struct GunSchedulingTests {
     func startStateIsNotReachedBeforeRenderStart() async throws {
         let player = FakeSignalPlayer()
         player.gunDuration = 1
-        let (engine, _, _, config) = makeEngine(holdTime: 0.2, player: player)
+        let clock = ManualClock()
+        let (engine, _, _, config) = makeEngine(holdTime: 0.2, player: player, clock: clock)
         
         engine.start(config: config)
-        await waitUntil { engine.state == .start }
+        await waitUntil { player.pendingSchedule != nil }
         
-        let renderStart = try #require(player.pendingSchedule?.renderStart)
-        #expect(CACurrentMediaTime() >= renderStart.seconds)
+        await clock.advance(by: 0.19)
+        #expect(engine.state == .waitForStart)
+        
+        await clock.advance(by: 0.02)
+        #expect(engine.state == .start)
         
         engine.abort()
     }
@@ -171,7 +186,8 @@ struct GunSchedulingTests {
     
     @Test
     func precisionWindowBeginsOneSecondBeforeTheGun() async throws {
-        let (engine, player, detector, config) = makeEngine(holdTime: 1.6)
+        let clock = ManualClock()
+        let (engine, player, detector, config) = makeEngine(holdTime: 1.6, clock: clock)
         
         engine.start(config: config)
         await waitUntil { engine.state == .waitForStart }
@@ -180,11 +196,15 @@ struct GunSchedulingTests {
         #expect(detector.startCount == 1)
         #expect(!detector.isInPrecisionWindow)
         
-        await waitUntil { detector.isInPrecisionWindow }
+        await clock.advance(by: 0.59)
+        #expect(!detector.isInPrecisionWindow)
+        
+        await clock.advance(by: 0.02)
+        #expect(detector.isInPrecisionWindow)
         
         let began = try #require(detector.precisionBegins.first)
         let gun = try #require(player.pendingSchedule?.renderStart.seconds)
-        #expect(abs(gun - began - StarterEngine.precisionLead) < 0.1)
+        #expect(began == gun - StarterEngine.precisionLead)
         
         engine.abort()
         #expect(!detector.isInPrecisionWindow)
@@ -194,7 +214,8 @@ struct GunSchedulingTests {
     func shortHoldOpensTheWindowDuringTheCommandBefore(startType: StartType) async throws {
         let player = FakeSignalPlayer()
         player.commandDuration = 1.2
-        let (engine, _, detector, _) = makeEngine(holdTime: 0, player: player)
+        let clock = ManualClock()
+        let (engine, _, detector, _) = makeEngine(holdTime: 0, player: player, clock: clock)
         
         var config = StartConfig.instant
         config.startType = startType
@@ -204,18 +225,27 @@ struct GunSchedulingTests {
         config.standingTimeToStartMin = 0.3
         config.standingTimeToStartMax = 0.3
         
+        // The window opens 0.5 s into the last command: its 1.2 s and the
+        // hold's 0.3 s, less the lead.
+        let lastCommandBegins = startType == .block ? 1.2 : 0
+        
         engine.start(config: config)
-        await waitUntil(timeout: .seconds(4)) { detector.isInPrecisionWindow }
+        await clock.advance(by: lastCommandBegins + 0.49)
+        #expect(!detector.isInPrecisionWindow)
+        
+        await clock.advance(by: 0.02)
+        #expect(detector.isInPrecisionWindow)
         
         // Still in the last command: the hold alone is shorter than the lead.
         #expect(engine.state == (startType == .block ? .set : .onYourMarks))
         #expect(detector.startCount == 0)
         
-        await waitUntil(timeout: .seconds(4)) { engine.state == .waitForStart }
+        await clock.advance(by: 0.7)
+        #expect(engine.state == .waitForStart)
         
         let began = try #require(detector.precisionBegins.first)
         let gun = try #require(player.pendingSchedule?.renderStart.seconds)
-        #expect(abs(gun - began - StarterEngine.precisionLead) < 0.1)
+        #expect(began == gun - StarterEngine.precisionLead)
         #expect(detector.precisionBegins.count == 1)
         
         engine.abort()
@@ -258,40 +288,44 @@ struct GunSchedulingTests {
     func slowPreflightDelaysTheFirstCommand() async {
         let player = FakeSignalPlayer()
         player.preflightDuration = .milliseconds(300)
-        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player)
+        let clock = ManualClock()
+        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player, clock: clock)
         
-        let began = CACurrentMediaTime()
         engine.start(config: config)
         
-        await waitUntil { engine.state == .preparing }
+        await clock.advance(by: 0.29)
+        #expect(engine.state == .preparing)
         #expect(player.played.isEmpty)
         
-        await waitUntil { !player.played.isEmpty }
-        #expect(CACurrentMediaTime() - began >= 0.3)
-        
-        await waitUntil { !engine.isRunning }
+        await clock.advance(by: 0.02)
+        #expect(!engine.isRunning)
+        #expect(player.played == [.onYourMarks, .set, .go])
         #expect(engine.lastSession?.outcome == .completed)
     }
     
     @Test
-    func preflightRunsWithinTheInitialWait() async {
+    func preflightRunsWithinTheInitialWait() async throws {
         let player = FakeSignalPlayer()
         player.preflightDuration = .milliseconds(200)
-        let (engine, _, _, _) = makeEngine(holdTime: 0, player: player)
+        let clock = ManualClock()
+        let (engine, _, _, _) = makeEngine(holdTime: 0, player: player, clock: clock)
         
         var config = StartConfig.instant
         config.blockTimeToReady = 0.4
         
-        let began = CACurrentMediaTime()
+        let began = clock.now().seconds
         engine.start(config: config)
-        await waitUntil { !player.played.isEmpty }
-        let waited = CACurrentMediaTime() - began
+        
+        await clock.advance(by: 0.39)
+        #expect(player.preflightCount == 1)
+        #expect(player.played.isEmpty)
+        
+        await clock.advance(by: 0.02)
+        #expect(!player.played.isEmpty)
         
         // The configured wait, not the wait plus the preflight.
-        #expect(waited >= 0.4)
-        #expect(waited < 0.55)
-        
-        engine.abort()
+        let firstCommand = try #require(event(.stateChanged(.onYourMarks), in: engine))
+        #expect(firstCommand.time.best.seconds == began + 0.4)
     }
     
     @Test

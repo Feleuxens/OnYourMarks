@@ -88,11 +88,20 @@ nonisolated struct DurationEstimate: Equatable, Codable, Sendable {
 
 protocol MonotonicClock: AnyObject {
     func now() -> MonotonicTimestamp
+    
+    /// Returns once the time is reached or the task is cancelled. Waiting
+    /// belongs to the clock so that whoever sets the time also decides when
+    /// a wait is over: tests move a clock of their own.
+    func sleep(until time: MonotonicTimestamp) async
 }
 
 /// Local phone's monotonic clock back by the system's monotonic host clock.
 final class SystemMonotonicClock: MonotonicClock {
     func now() -> MonotonicTimestamp {
         .init(seconds: CACurrentMediaTime())
+    }
+    
+    func sleep(until time: MonotonicTimestamp) async {
+        try? await Task.sleep(for: .seconds(max(0, time.seconds - now().seconds)))
     }
 }

@@ -29,8 +29,9 @@ class FakeSignalPlayer: SignalPlayer {
     /// Returned by the preflight, which fails with `preflightError` if set.
     var preflight = AudioPreflight.fake()
     var preflightError: Error?
-    /// How long the preflight takes.
+    /// How long the preflight takes, on `clock` if there is one.
     var preflightDuration: Duration = .zero
+    var clock: MonotonicClock?
     private(set) var preflightCount = 0
     
     /// The scheduled signal that stop() has not cancelled yet.
@@ -96,7 +97,13 @@ class FakeSignalPlayer: SignalPlayer {
         preflightCount += 1
         
         if preflightDuration > .zero {
-            try await Task.sleep(for: preflightDuration)
+            if let clock {
+                let seconds = preflightDuration / .seconds(1)
+                await clock.sleep(until: MonotonicTimestamp(seconds: clock.now().seconds + seconds))
+                try Task.checkCancellation()
+            } else {
+                try await Task.sleep(for: preflightDuration)
+            }
         }
         
         if let preflightError {
@@ -128,6 +135,8 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
     
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
+    /// When the session was last given back, on the host clock.
+    private(set) var deactivatedAt: TimeInterval?
     private(set) var isSessionActive = false
     
     /// While true, activateSession() waits until releaseActivation() is called.
@@ -174,6 +183,7 @@ final class FakeSessionPlayer: FakeSignalPlayer, AudioSessionPlayer {
             guard isSessionActive else { return }
             
             deactivateCount += 1
+            deactivatedAt = CACurrentMediaTime()
             isSessionActive = false
         }
         
@@ -267,8 +277,9 @@ final class FakeMovementDetector: MovementDetector {
         stopCount += 1
     }
     
-    /// When each precision window began, on the host clock.
+    /// When each precision window began, on `clock`.
     private(set) var precisionBegins: [TimeInterval] = []
+    var clock: MonotonicClock = SystemMonotonicClock()
     private(set) var precisionEndCount = 0
     
     var isInPrecisionWindow: Bool {
@@ -276,7 +287,7 @@ final class FakeMovementDetector: MovementDetector {
     }
     
     func beginPrecisionWindow() {
-        precisionBegins.append(CACurrentMediaTime())
+        precisionBegins.append(clock.now().seconds)
     }
     
     func endPrecisionWindow() {
@@ -333,22 +344,109 @@ final class FakeMovementDetector: MovementDetector {
 }
 
 /// Yields until the condition holds, failing the test after the timeout.
+///
+/// The timeout counts the time the waiting test saw pass in its own turns,
+/// not the wall clock: a turn that took longer than `waitStallLimit` counts
+/// as that. Otherwise a wait fails without anything having had a chance to
+/// run, when the process stood still or the main actor was held: under
+/// Xcode's debugger on the device each library loaded during the run stops
+/// the process (measured: 10 stops of 0.27 to 0.78 s, 4.5 s of the first
+/// 5.5 s).
 @MainActor
 func waitUntil(
     timeout: Duration = .seconds(2),
     _ condition: () -> Bool
 ) async {
-    let deadline = ContinuousClock.now + timeout
+    let clock = ContinuousClock()
+    let giveUp = clock.now + timeout * waitWallClockFactor
+    var waited = Duration.zero
+    var last = clock.now
     
-    while ContinuousClock.now < deadline {
+    while waited < timeout, clock.now < giveUp {
         if condition() {
             return
         }
 
         await Task.yield()
+        
+        let now = clock.now
+        waited += min(now - last, waitStallLimit)
+        last = now
     }
 
     #expect(condition())
+}
+
+/// The longest one turn of a waiting test counts towards its timeout. A
+/// turn is one round of the main actor through everything that waits, a
+/// few milliseconds with all suites in parallel; longer ones are stalls.
+private let waitStallLimit = Duration.milliseconds(50)
+
+/// However little of it counted, a wait ends after this many timeouts.
+private let waitWallClockFactor = 10
+
+/// A clock that only moves when the test moves it, so what the engine does
+/// at which time can be checked exactly, however long the process stood
+/// still meanwhile.
+@MainActor
+final class ManualClock: MonotonicClock {
+    private var seconds: TimeInterval
+    private var sleepers: [UUID: (deadline: TimeInterval, continuation: CheckedContinuation<Void, Never>)] = [:]
+    
+    /// Rounds of the main actor given to whoever was woken before the time
+    /// moves on. From a wake-up to the next sleep the engine needs a handful
+    /// of main-actor jobs, each at most one round away.
+    private static let settleRounds = 50
+    
+    init(startingAt seconds: TimeInterval = 1000) {
+        self.seconds = seconds
+    }
+    
+    func now() -> MonotonicTimestamp {
+        MonotonicTimestamp(seconds: seconds)
+    }
+    
+    func sleep(until time: MonotonicTimestamp) async {
+        guard time.seconds > seconds, !Task.isCancelled else { return }
+        
+        let id = UUID()
+        
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { sleepers[id] = (time.seconds, $0) }
+        } onCancel: {
+            Task { @MainActor in self.wake(id) }
+        }
+    }
+    
+    /// Lets the time pass. Every sleeper is woken at exactly its own time,
+    /// in order, and gets to act before the clock moves on.
+    func advance(by duration: TimeInterval) async {
+        let target = seconds + duration
+        await settle()
+        
+        while let next = sleepers.values.map({ $0.deadline }).min(), next <= target {
+            seconds = max(seconds, next)
+            
+            for (id, sleeper) in sleepers where sleeper.deadline <= seconds {
+                wake(id)
+            }
+            
+            await settle()
+        }
+        
+        seconds = target
+        await settle()
+    }
+    
+    private func wake(_ id: UUID) {
+        sleepers.removeValue(forKey: id)?.continuation.resume()
+    }
+    
+    private func settle() async {
+        for _ in 0..<Self.settleRounds {
+            await Task.yield()
+        }
+    }
 }
 
 extension AudioPreflight {

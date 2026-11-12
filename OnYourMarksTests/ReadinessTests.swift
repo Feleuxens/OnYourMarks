@@ -9,9 +9,11 @@ import QuartzCore
 
 @MainActor
 struct ReadinessTests {
+    /// With a clock, the engine tells and waits its time by it.
     private func makeEngine(
         holdTime: Double,
-        ready: Bool = true
+        ready: Bool = true,
+        clock: ManualClock? = nil
     ) -> (StarterEngine, FakeSignalPlayer, FakeMovementDetector, StartConfig) {
         let player = FakeSignalPlayer()
         player.gunDuration = 1
@@ -23,7 +25,13 @@ struct ReadinessTests {
         config.blockTimeToStartMin = holdTime
         config.blockTimeToStartMax = holdTime
         
-        return (StarterEngine(player: player, movementDetector: detector), player, detector, config)
+        let engine = if let clock {
+            StarterEngine(player: player, movementDetector: detector, clock: clock, decisionEngine: DecisionEngine())
+        } else {
+            StarterEngine(player: player, movementDetector: detector)
+        }
+        
+        return (engine, player, detector, config)
     }
     
     private func kinds(_ engine: StarterEngine) -> [StartEventKind] {
@@ -39,30 +47,32 @@ struct ReadinessTests {
     
     @Test
     func theGunWaitsUntilTheAthletesHoldStill() async throws {
-        let (engine, player, detector, config) = makeEngine(holdTime: 0.2, ready: false)
+        let clock = ManualClock()
+        let (engine, player, detector, config) = makeEngine(holdTime: 0.2, ready: false, clock: clock)
         
         engine.start(config: config)
         await waitUntil { engine.state == .waitForStart }
-        await settle()
+        
+        // Far longer than the hold.
+        await clock.advance(by: 3)
         
         #expect(player.scheduleRequests.isEmpty)
         #expect(!kinds(engine).contains(.athletesReady))
         
-        let becameReady = CACurrentMediaTime()
         detector.setReady(true)
         await waitUntil { !player.scheduleRequests.isEmpty }
         
         // The hold counts from the moment they were still.
         let requested = try #require(player.scheduleRequests.first?.seconds)
-        #expect(requested >= becameReady + 0.2)
-        #expect(requested < becameReady + 0.3)
+        #expect(requested == clock.now().seconds + 0.2)
         
         let events = kinds(engine)
         let ready = try #require(events.firstIndex(of: .athletesReady))
         let scheduled = try #require(events.firstIndex { $0.isGunScheduled })
         #expect(ready < scheduled)
         
-        await waitUntil { !engine.isRunning }
+        // The hold and the gun's sound.
+        await clock.advance(by: 0.2 + 1)
         #expect(engine.lastSession?.outcome == .completed)
     }
     
@@ -172,36 +182,37 @@ struct ReadinessTests {
     @Test
     func afterADisturbanceTheGunKeepsItsDistance() async throws {
         // A hold much shorter than the least one after a disturbance.
-        let (engine, player, detector, config) = makeEngine(holdTime: 0.3)
+        let clock = ManualClock()
+        let (engine, player, detector, config) = makeEngine(holdTime: 0.3, clock: clock)
         
         engine.start(config: config)
         await waitUntil { player.pendingSchedule != nil }
+        await clock.advance(by: 0.1)
         
         // Still again at once, as the fake is.
-        detector.emitUnsteady(at: CACurrentMediaTime())
-        let stillAgain = CACurrentMediaTime()
+        detector.emitUnsteady(at: clock.now().seconds)
         await waitUntil { player.scheduleRequests.count == 2 }
         
         let requested = try #require(player.scheduleRequests.last?.seconds)
-        #expect(requested >= stillAgain + engine.minimumHoldAfterDisturbance)
-        #expect(requested < stillAgain + engine.minimumHoldAfterDisturbance + 0.2)
+        #expect(requested == clock.now().seconds + engine.minimumHoldAfterDisturbance)
         
         engine.abort()
     }
     
     @Test
     func aLongerHoldIsKeptAfterADisturbance() async throws {
-        let (engine, player, detector, config) = makeEngine(holdTime: 10)
+        let clock = ManualClock()
+        let (engine, player, detector, config) = makeEngine(holdTime: 10, clock: clock)
         
         engine.start(config: config)
         await waitUntil { player.pendingSchedule != nil }
+        await clock.advance(by: 0.1)
         
-        detector.emitUnsteady(at: CACurrentMediaTime())
-        let stillAgain = CACurrentMediaTime()
+        detector.emitUnsteady(at: clock.now().seconds)
         await waitUntil { player.scheduleRequests.count == 2 }
         
         let requested = try #require(player.scheduleRequests.last?.seconds)
-        #expect(requested >= stillAgain + 10)
+        #expect(requested == clock.now().seconds + 10)
         
         engine.abort()
     }

@@ -756,8 +756,7 @@ final class StarterEngine {
             return !Task.isCancelled
         }
         
-        let seconds = max(0, time.seconds - clock.now().seconds)
-        let sleeper = Task { _ = try? await Task.sleep(for: .seconds(seconds)) }
+        let sleeper = Task { [clock] in await clock.sleep(until: time) }
         
         if wakeable {
             wakeableSleep = sleeper
