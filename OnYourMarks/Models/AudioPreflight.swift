@@ -16,7 +16,7 @@ nonisolated struct AudioPreflight: Equatable, Codable, Sendable {
 
     /// A wireless output's latency is only an estimate until it is calibrated.
     var isCalibrationMissing: Bool {
-        gunTiming.route?.isWireless == true && gunTiming.calibration == nil
+        gunTiming.isCalibrationMissing
     }
 }
 

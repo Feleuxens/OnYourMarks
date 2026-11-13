@@ -58,9 +58,21 @@ nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     /// be heard, derived from the attached output, latency and calibration.
     case gunScheduled(SignalTimingBasis)
     
+    /// The gun could no longer be taken back; the event time is when it
+    /// is heard. Movements are measured against it from here on.
+    case gunCommitted
+    
     /// Read back from the audio render timeline after the gun started;
     /// the event time is when it was heard.
     case gunPlaybackMeasured
+    
+    /// The gun could not be found on the render timeline. Reactions judged
+    /// after this can't be held against an athlete.
+    case gunPlaybackNotMeasured
+    
+    /// The gun started off its schedule; the event time is the gun's time
+    /// from here on, wide enough for the schedule and the measurement.
+    case gunTimeRevised
     
     /// The athletes found when monitoring began; only they are judged.
     case rosterEstablished(AthleteRoster)

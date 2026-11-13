@@ -455,6 +455,76 @@ extension VideoRecordingTests {
         }
     
         @Test
+        func whatAnUnfinishedStartLeftBehindIsClearedWhenTheAppOpens() async throws {
+            let controller = makeController()
+        
+            _ = try await record(with: controller)
+            await waitUntil(timeout: patience) { controller.last != nil }
+            let last = try #require(controller.last)
+        
+            // A start whose files were never completed.
+            let orphan = UUID()
+            _ = try store.prepare(orphan)
+        
+            let reopened = makeController()
+        
+            #expect(reopened.last == last)
+            #expect(FileManager.default.fileExists(atPath: reopened.videoURL(of: last).path))
+            #expect(!FileManager.default.fileExists(atPath: store.directory(of: orphan, in: .temporary).path))
+        }
+    
+        /// The folders of the temporary recordings that hold the given file.
+        private func temporaryFolders(holding file: String? = nil) -> [URL] {
+            let root = store.directory(of: UUID(), in: .temporary).deletingLastPathComponent()
+            let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        
+            return folders.filter { folder in
+                file.map { FileManager.default.fileExists(atPath: folder.appending(path: $0).path) } ?? true
+            }
+        }
+    
+        @Test
+        func aStartBegunWhileTheLastIsStoredKeepsItsFolder() async throws {
+            let controller = makeController()
+        
+            try #require(controller.beginRecording())
+            for index in 0..<6 {
+                try await source.deliver(at: 9.5 + Double(index) / 120, index: index)
+            }
+        
+            // So much tracking data that storing it takes a while. The
+            // start's record is written first.
+            for index in 0..<100_000 {
+                controller.record(TrackingFrame(time: MonotonicTimestamp(seconds: 9.5 + Double(index) / 1000), athletes: []))
+            }
+            let first = recordedSession()
+            controller.endRecording(session: first, results: [], tail: 0)
+        
+            await waitUntil(timeout: patience) {
+                !temporaryFolders(holding: RecordingStore.recordFileName).isEmpty
+            }
+            try #require(controller.last == nil)
+        
+            // The next start reaches its hold while the tracking data is written.
+            try #require(controller.beginRecording())
+            let folders = temporaryFolders()
+            try #require(folders.count == 2)
+        
+            await waitUntil(timeout: patience) { controller.last?.session == first }
+        
+            #expect(temporaryFolders().count == 2)
+        
+            for index in 0..<6 {
+                try await source.deliver(at: 20 + Double(index) / 120, index: index)
+            }
+            let second = recordedSession(outcome: .falseStart)
+            controller.endRecording(session: second, results: [], tail: 0)
+        
+            await waitUntil(timeout: patience) { controller.last?.session == second && !controller.isFinishing }
+            #expect(store.recordings(in: .temporary).map { $0.session } == [second])
+        }
+    
+        @Test
         func aFalseStartHasNoTail() async throws {
             let controller = makeController()
         
@@ -572,6 +642,37 @@ struct ReplayTimelineTests {
         session.record(.stateChanged(.start), at: second, source: .system)
         
         #expect(ReplayTimeline.gun(in: session) == second)
+    }
+    
+    @Test
+    func aGunThatWasOutBeforeARecallIsShown() {
+        var session = StartSession(startType: .block, profile: .block, createdAt: MonotonicTimestamp(seconds: 0))
+        let heard = TimeEstimate.exact(MonotonicTimestamp(seconds: 10))
+        
+        // Recalled between the gun going out and the sequence reaching it.
+        session.record(.gunScheduled(AudioPreflight.fake().gunTiming), at: heard, source: .audioLocal)
+        session.record(.gunCommitted, at: heard, source: .audioLocal)
+        session.record(.stateChanged(.falseStart), at: heard, source: .system)
+        
+        #expect(ReplayTimeline.gun(in: session) == heard)
+    }
+    
+    @Test
+    func aGunOffItsScheduleIsShownAsRevised() {
+        var session = StartSession(startType: .block, profile: .block, createdAt: MonotonicTimestamp(seconds: 0))
+        let scheduled = TimeEstimate.exact(MonotonicTimestamp(seconds: 10))
+        let revised = TimeEstimate(
+            best: MonotonicTimestamp(seconds: 10.004),
+            earliest: MonotonicTimestamp(seconds: 10),
+            latest: MonotonicTimestamp(seconds: 10.004)
+        )
+        
+        session.record(.gunScheduled(AudioPreflight.fake().gunTiming), at: scheduled, source: .audioLocal)
+        session.record(.gunCommitted, at: scheduled, source: .audioLocal)
+        session.record(.stateChanged(.start), at: scheduled, source: .system)
+        session.record(.gunTimeRevised, at: revised, source: .audioLocal)
+        
+        #expect(ReplayTimeline.gun(in: session) == revised)
     }
     
     @Test

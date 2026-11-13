@@ -197,12 +197,12 @@ final class PoseMotionDetector: MovementDetector {
         if needsReference || !compensates {
             cameraMotion.reset()
         }
-        let cameraOffset = compensates ? cameraMotion.offset(in: frame) : .zero
+        let cameraShift = compensates ? cameraMotion.shift(in: frame) : .measured(.zero)
 
         let (athletes, phases, regions, poseEvents) = tracking.withLock {
             let athletes = $0.tracker.update(with: poses, at: frame.timestamp)
             $0.athletes = athletes
-            let events = $0.monitor.process(athletes, cameraOffset: cameraOffset, at: frame.timestamp)
+            let events = $0.monitor.process(athletes, camera: cameraShift, at: frame.timestamp)
             return (athletes, $0.monitor.phases, $0.monitor.regions, events)
         }
 
@@ -223,7 +223,7 @@ final class PoseMotionDetector: MovementDetector {
             time: frame.timestamp,
             athletes: athletes,
             phases: phases,
-            cameraOffset: compensates ? cameraOffset : nil
+            cameraOffset: compensates ? cameraShift.offset : nil
         )
 
         Task { @MainActor [weak self] in

@@ -107,7 +107,8 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
     // MARK: - Gun
 
     /// The gun that was heard: the last one scheduled that was not taken
-    /// back and whose time the sequence reached.
+    /// back and whose time the sequence reached, as revised if it started
+    /// off its schedule.
     static func gun(in session: StartSession) -> TimeEstimate? {
         var scheduled: TimeEstimate?
         var fired: TimeEstimate?
@@ -118,8 +119,10 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
                 scheduled = event.time
             case .gunCancelled:
                 scheduled = nil
-            case .stateChanged(.start):
+            case .gunCommitted, .stateChanged(.start):
                 fired = scheduled
+            case .gunTimeRevised:
+                fired = event.time
             default:
                 break
             }

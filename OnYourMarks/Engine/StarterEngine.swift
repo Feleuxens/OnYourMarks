@@ -53,10 +53,14 @@ final class StarterEngine {
     
     private var sequenceTask: Task<Void, Never>?
     
-    /// When the gun is heard, set once it has started.
+    /// When the gun is heard, set once it can no longer be taken back.
     /// Before that, any movement is a false start.
     private var gunTime: TimeEstimate?
     private var scheduledGun: ScheduledSignal?
+    
+    /// Set when the gun could not be found on the render timeline: nothing
+    /// says it was heard when it was scheduled.
+    private var gunWasNotMeasured = false
     
     /// Long enough for the first render cycles to have passed.
     private static let gunMeasurementDelay: TimeInterval = 0.05
@@ -169,6 +173,7 @@ final class StarterEngine {
         
         gunTime = nil
         scheduledGun = nil
+        gunWasNotMeasured = false
         roster = nil
         athleteResults = []
         firstFalseStart = nil
@@ -284,6 +289,8 @@ final class StarterEngine {
     }
     
     private func handle(_ event: DetectorEvent) {
+        commitGunIfDue()
+        
         switch event {
         case .movement(let observation):
             handleMovement(observation)
@@ -395,10 +402,7 @@ final class StarterEngine {
             athleteID: athleteID
         )
         
-        let decision = decisionEngine.qualify(
-            decisionEngine.evaluateReaction(reaction, profile: profile),
-            by: observation.quality
-        )
+        let decision = decide(reaction, movement: movementTime, quality: observation.quality, profile: profile)
         
         logger.info(
             """
@@ -457,10 +461,7 @@ final class StarterEngine {
         }
         
         let reaction = refinement.onset.duration(since: gunTime)
-        let decision = decisionEngine.qualify(
-            decisionEngine.evaluateReaction(reaction, profile: profile),
-            by: live.trackingQuality
-        )
+        let decision = decide(reaction, movement: refinement.onset, quality: live.trackingQuality, profile: profile)
         
         athleteResults[index] = AthleteStartResult(
             athleteID: live.athleteID,
@@ -498,6 +499,44 @@ final class StarterEngine {
                 athleteID: refinement.athleteID
             )
         }
+    }
+    
+    /// Judges a reaction as far as the tracking and the gun's time carry it.
+    private func decide(
+        _ reaction: DurationEstimate,
+        movement: TimeEstimate,
+        quality: TrackingQuality?,
+        profile: StartProfile
+    ) -> StartDecision {
+        let decision = decisionEngine.qualify(
+            decisionEngine.evaluateReaction(reaction, profile: profile),
+            by: quality
+        )
+        
+        return decisionEngine.qualify(
+            decision,
+            gunTimeIsTrusted: gunTimeIsTrusted,
+            movedBeforeRender: scheduledGun.map { movement.latest < $0.renderStart } ?? false
+        )
+    }
+    
+    /// Whether the gun's time is known well enough to hold a reaction
+    /// against an athlete: not on a wireless output whose delay was never
+    /// measured, and not when the gun could not be read back.
+    private var gunTimeIsTrusted: Bool {
+        !gunWasNotMeasured && scheduledGun?.basis.isCalibrationMissing != true
+    }
+    
+    /// Counts the gun as fired once it can no longer be taken back, even if
+    /// the sequence hasn't got there yet: the audio clock starts the gun by
+    /// itself, and a detector event can reach the engine before the
+    /// sequence's task runs again. Judged by `gunTime == nil`, that event
+    /// would be a movement before the gun, or take back a gun that sounds.
+    private func commitGunIfDue() {
+        guard gunTime == nil, let gun = scheduledGun, clock.now() >= gun.cancellableUntil else { return }
+        
+        gunTime = gun.audibleOnset
+        record(.gunCommitted, at: gun.audibleOnset, source: .audioLocal)
     }
     
     /// Stores one athlete's result and acts on it: a false start recalls the
@@ -576,6 +615,11 @@ final class StarterEngine {
         
         player.stop()
         
+        // A gun that was still pending is taken back by that.
+        if gunTime == nil {
+            scheduledGun = nil
+        }
+        
         setState(.falseStart)
         
         // Monitoring goes on: other athletes may have false-started as well,
@@ -630,7 +674,7 @@ final class StarterEngine {
                 
             case .start:
                 // Already playing from the schedule.
-                gunTime = scheduledGun?.audibleOnset
+                commitGunIfDue()
                 
                 // Read back early: the estimate extrapolates over the time
                 // since the start, so any clock drift grows with it.
@@ -710,8 +754,17 @@ final class StarterEngine {
             // Off the timing path: the gun no longer depends on this task.
             player.logTimingDiagnostics(label: "Gun scheduled")
             
-            while !holdWasDisturbed, clock.now() < gun.renderStart {
+            while clock.now() < gun.renderStart {
                 guard await wait(until: gun.renderStart, gunIn: 0, wakeable: true) else { return .cancelled }
+                
+                guard holdWasDisturbed else { continue }
+                
+                if clock.now() < gun.cancellableUntil {
+                    break
+                }
+                
+                // Too late to take it back without a sound: the gun fires.
+                holdWasDisturbed = false
             }
             
             guard holdWasDisturbed else { return nil }
@@ -784,7 +837,7 @@ final class StarterEngine {
         )
         
         if preflight.isCalibrationMissing {
-            logger.notice("Wireless output without calibration: the gun time is only an estimate")
+            logger.notice("Wireless output without calibration: reactions after the gun stay uncertain")
         }
     }
     
@@ -864,6 +917,8 @@ final class StarterEngine {
         
         guard let measured = player.measuredPlayback(of: .go) else {
             logger.error("Gun playback could not be measured")
+            gunWasNotMeasured = true
+            record(.gunPlaybackNotMeasured, source: .audioLocal)
             return
         }
         
@@ -873,6 +928,17 @@ final class StarterEngine {
         
         if abs(deviation) > OutputTiming.maximumScheduleDeviation {
             logger.error("Gun started \(deviation * 1000, format: .fixed(precision: 3)) ms off its schedule")
+            
+            // Most likely as measured, but wide enough for the schedule too,
+            // so a reaction that depends on which is right stays uncertain.
+            let revised = TimeEstimate(
+                best: measured.audibleOnset.best,
+                earliest: min(scheduled.audibleOnset.earliest, measured.audibleOnset.earliest),
+                latest: max(scheduled.audibleOnset.latest, measured.audibleOnset.latest)
+            )
+            
+            gunTime = revised
+            record(.gunTimeRevised, at: revised, source: .audioLocal)
         } else {
             logger.info("Gun started \(deviation * 1_000_000, format: .fixed(precision: 1)) µs from its schedule")
         }

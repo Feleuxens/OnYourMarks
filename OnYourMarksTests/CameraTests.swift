@@ -307,9 +307,11 @@ struct CameraControllerTests {
         camera.setFrameHandler { frame in
             _ = tracker.poses(in: frame)
             let began = CACurrentMediaTime()
-            let offset = estimator.offset(in: frame)
+            let offset = estimator.shift(in: frame).offset
             durations.withLock { $0.append(CACurrentMediaTime() - began) }
-            offsets.withLock { $0.append(offset) }
+            if let offset {
+                offsets.withLock { $0.append(offset) }
+            }
         }
 
         try #require(camera.configureIfNeeded())
@@ -488,6 +490,69 @@ struct CameraControllerTests {
 
         camera.stop()
         Attachment.record(report, named: "Switching the precision rate")
+
+        // Lets the session let go of the camera before the next test takes it.
+        try await Task.sleep(for: .seconds(2))
+    }
+
+    /// A precision window that stays at the idle rate times every movement
+    /// in it to 67 ms. The device takes the new frame durations every time,
+    /// but a running session has been seen to go on at the old rate; this
+    /// opens the window again and again and reports each one.
+    @Test(.enabled(if: cameraRequested))
+    func thePrecisionRateArrivesEveryTime() async throws {
+        let camera = CameraController()
+        let log = FrameLog()
+
+        camera.setFrameHandler { frame in
+            log.frames.withLock { $0.append((frame.timestamp.seconds, CACurrentMediaTime())) }
+        }
+
+        try #require(camera.configureIfNeeded())
+        let format = try #require(camera.format)
+        let expected = min(camera.precisionFrameRate, format.maxFrameRate)
+        camera.start()
+        try await Task.sleep(for: .seconds(2))
+
+        var report = ""
+        var delays: [TimeInterval] = []
+
+        for window in 1...12 {
+            let began = CACurrentMediaTime()
+            camera.setMode(.precision)
+            try await Task.sleep(for: .seconds(1.5))
+            let precision = log.rate(since: CACurrentMediaTime() - 0.8)
+
+            // The switch is over with the first two frames that follow
+            // each other at the precision rate.
+            let captured = log.frames.withLock { $0.map(\.captured).filter { $0 >= began } }
+            let arrived = zip(captured, captured.dropFirst()).first { $1 - $0 < 1.5 / expected }?.0
+            let longestGap = zip(captured, captured.dropFirst()).map { $1 - $0 }.max() ?? 0
+
+            camera.setMode(.idle)
+            try await Task.sleep(for: .seconds(1))
+            let idle = log.rate(since: CACurrentMediaTime() - 0.6)
+
+            if let arrived {
+                delays.append(arrived - began)
+            }
+            report += """
+            window \(window): precision \(precision) fps after \(arrived.map { "\(($0 - began) * 1000) ms" } ?? "never"), \
+            longest gap \(longestGap * 1000) ms, idle again \(idle) fps
+
+            """
+
+            #expect(precision > expected * 0.9)
+            #expect(abs(idle - CameraFrameRatePolicy.idle) < 2)
+        }
+
+        camera.stop()
+
+        let sorted = delays.sorted()
+        if let last = sorted.last {
+            report += "idle to precision: median \(sorted[sorted.count / 2] * 1000) ms, longest \(last * 1000) ms\n"
+        }
+        Attachment.record(report, named: "Precision rate every time")
 
         // Lets the session let go of the camera before the next test takes it.
         try await Task.sleep(for: .seconds(2))

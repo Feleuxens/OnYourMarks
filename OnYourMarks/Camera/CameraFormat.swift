@@ -53,7 +53,7 @@ nonisolated struct CameraFormatDescriptor: Equatable, Sendable {
     }
 }
 
-extension CameraFormatDescriptor {
+nonisolated extension CameraFormatDescriptor {
     init(_ format: AVCaptureDevice.Format) {
         let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
 

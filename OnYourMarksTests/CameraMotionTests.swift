@@ -66,23 +66,24 @@ struct CameraMotionTests {
         #expect(abs(down.y) < 0.000_001)
     }
 
+    private func frame(_ buffer: CVPixelBuffer, at seconds: TimeInterval) -> CameraFrame {
+        CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: seconds), index: 0)
+    }
+
     @Test
     func offsetsAreMeasuredAgainstTheFirstFrameAfterAReset() throws {
         let estimator = CameraMotionEstimator()
-        func frame(_ buffer: CVPixelBuffer, _ index: Int) -> CameraFrame {
-            CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: Double(index)), index: index)
-        }
 
-        #expect(estimator.offset(in: frame(try picture(), 0)) == .zero)
+        #expect(estimator.shift(in: frame(try picture(), at: 0)) == .measured(.zero))
 
         // Not accumulated: each frame is compared with the reference itself.
-        _ = estimator.offset(in: frame(try picture(movedRight: 30), 1))
-        let offset = estimator.offset(in: frame(try picture(movedRight: 16, down: 9), 2))
+        _ = estimator.shift(in: frame(try picture(movedRight: 12), at: 0.01))
+        let offset = try #require(estimator.shift(in: frame(try picture(movedRight: 16, down: 9), at: 0.02)).offset)
         #expect(abs(offset.x + 9.0 / 360) < 0.003)
         #expect(abs(offset.y + 16.0 / 640) < 0.003)
 
         estimator.reset()
-        #expect(estimator.offset(in: frame(try picture(movedRight: 16, down: 9), 3)) == .zero)
+        #expect(estimator.shift(in: frame(try picture(movedRight: 16, down: 9), at: 0.03)) == .measured(.zero))
     }
 
     @Test
@@ -98,16 +99,36 @@ struct CameraMotionTests {
     }
 
     @Test
-    func aShiftTooLargeToBeTremorIsNotApplied() throws {
+    func aShiftTooLargeToBeTremorIsNotMeasured() throws {
         let estimator = CameraMotionEstimator()
-        func frame(_ buffer: CVPixelBuffer, _ index: Int) -> CameraFrame {
-            CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: Double(index)), index: index)
-        }
 
-        _ = estimator.offset(in: frame(try picture(), 0))
-        let small = estimator.offset(in: frame(try picture(movedRight: 16), 1))
+        _ = estimator.shift(in: frame(try picture(), at: 0))
+        #expect(estimator.shift(in: frame(try picture(movedRight: 16), at: 0.01)).offset != nil)
 
-        // Half the picture's width away: the last trusted shift stays.
-        #expect(estimator.offset(in: frame(try picture(movedRight: 320), 2)) == small)
+        // Half the picture's width away: nothing to correct by, and the
+        // shift before it says nothing about this frame.
+        #expect(estimator.shift(in: frame(try picture(movedRight: 320), at: 0.02)) == .unmeasured)
+
+        // One such frame is passed over; the reference is still the first picture.
+        let offset = try #require(estimator.shift(in: frame(try picture(movedRight: 16), at: 0.03)).offset)
+        #expect(abs(offset.y + 16.0 / 640) < 0.003)
+    }
+
+    @Test
+    func aCameraThatStaysAwayIsMeasuredAgainstANewPicture() throws {
+        let estimator = CameraMotionEstimator()
+        let patience = CameraMotionEstimator.patience
+
+        _ = estimator.shift(in: frame(try picture(), at: 0))
+
+        // A pan that ends half the picture's width away.
+        #expect(estimator.shift(in: frame(try picture(movedRight: 320), at: 1)) == .unmeasured)
+        #expect(estimator.shift(in: frame(try picture(movedRight: 320), at: 1 + patience / 2)) == .unmeasured)
+        #expect(estimator.shift(in: frame(try picture(movedRight: 320), at: 1 + patience + 0.01)) == .lost)
+
+        // The picture after that is the one to measure against.
+        #expect(estimator.shift(in: frame(try picture(movedRight: 320), at: 1.2)) == .measured(.zero))
+        let offset = try #require(estimator.shift(in: frame(try picture(movedRight: 336), at: 1.21)).offset)
+        #expect(abs(offset.y + 16.0 / 640) < 0.003)
     }
 }

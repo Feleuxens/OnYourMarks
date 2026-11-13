@@ -440,9 +440,14 @@ final class AudioController: AudioSessionPlayer {
     ) -> ScheduledSignal {
         let basis = timingBasis(for: signal, on: node, applyingCalibration: applyingCalibration)
         
+        let cancellationLead = OutputTiming.cancellationLead(
+            ioBufferDuration: AVAudioSession.sharedInstance().ioBufferDuration
+        )
+        
         return ScheduledSignal(
             signal: signal,
             renderStart: renderStart,
+            cancellableUntil: MonotonicTimestamp(seconds: renderStart.seconds - cancellationLead),
             audibleOnset: basis.audibleOnset(renderStart: renderStart),
             basis: basis
         )
@@ -460,7 +465,7 @@ final class AudioController: AudioSessionPlayer {
         let route = currentOutput()
         let calibration = applyingCalibration ? route.flatMap { calibrations[$0.id] } : nil
         
-        let uncertainty = calibration.map(OutputTiming.uncertainty(calibrated:))
+        let uncertainty = calibration.map { OutputTiming.uncertainty(calibrated: $0, latency: latency) }
             ?? OutputTiming.uncertainty(latency: latency, isWireless: route?.isWireless ?? false)
         
         return SignalTimingBasis(
@@ -606,7 +611,8 @@ final class AudioController: AudioSessionPlayer {
             correction: summary.correction,
             uncertainty: summary.uncertainty,
             clickCount: offsets.count,
-            date: .now
+            date: .now,
+            reportedLatency: clicks.first?.basis.outputLatency
         )
     }
     

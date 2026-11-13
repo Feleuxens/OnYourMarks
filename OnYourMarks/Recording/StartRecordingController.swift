@@ -29,9 +29,6 @@ final class StartRecordingController: StartRecorder {
     @ObservationIgnored private var tailTask: Task<Void, Never>?
     private var finishing = 0
 
-    /// Recordings whose folders are in use and must not be cleared away.
-    @ObservationIgnored private var active: Set<UUID> = []
-
     @ObservationIgnored private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",
         category: "Recording"
@@ -60,6 +57,11 @@ final class StartRecordingController: StartRecorder {
 
         last = store.recordings(in: .temporary).first
         saved = store.recordings(in: .library)
+
+        // What a start left behind that never finished, e.g. when the app
+        // was closed. Only here, before anything records: a sweep beside a
+        // recording in progress could take its folder.
+        store.keepOnly(Set(last.map { [$0.id] } ?? []))
     }
 
     // MARK: - Recording
@@ -76,7 +78,6 @@ final class StartRecordingController: StartRecorder {
             let writer = VideoFileWriter(url: try store.prepare(id))
 
             capture = Capture(id: id, date: .now, writer: writer)
-            active.insert(id)
             source.setRecordingHandler(Self.frameHandler(for: writer))
             return true
         } catch {
@@ -133,10 +134,7 @@ final class StartRecordingController: StartRecorder {
     }
 
     private func complete(_ capture: Capture, _ summary: VideoFileWriter.Summary) async {
-        defer {
-            finishing -= 1
-            active.remove(capture.id)
-        }
+        defer { finishing -= 1 }
 
         if let failure = summary.failure {
             logger.error("The recording failed: \(failure, privacy: .public)")
@@ -164,8 +162,7 @@ final class StartRecordingController: StartRecorder {
                 return
             }
 
-            let kept = active.union(last.map { [$0.id] } ?? [])
-            try await Self.write(recording, capture: capture, keeping: kept, in: store)
+            try await Self.write(recording, capture: capture, in: store)
         } catch {
             logger.error("Could not store the recording: \(error.localizedDescription, privacy: .public)")
             store.delete(capture.id, in: .temporary)
@@ -199,11 +196,9 @@ final class StartRecordingController: StartRecorder {
     private nonisolated static func write(
         _ recording: StartRecording,
         capture: Capture,
-        keeping active: Set<UUID>,
         in store: RecordingStore
     ) async throws {
         try store.write(recording, tracking: capture.tracking, motion: capture.motion)
-        store.keepOnly(active.union([recording.id]))
     }
 
     /// Built outside the main actor: the camera calls it on the capture queue.

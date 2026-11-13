@@ -212,4 +212,18 @@ struct TimingAndDecisionTests {
                     .sessionEnded(.completed)
             )
         }
+
+        @Test
+        func anAssumedGunTimeConvictsNoOne() {
+            let engine = DecisionEngine()
+
+            #expect(engine.qualify(.definiteFalseStart, gunTimeIsTrusted: false, movedBeforeRender: false) == .uncertain)
+            #expect(engine.qualify(.definiteFalseStart, gunTimeIsTrusted: true, movedBeforeRender: false) == .definiteFalseStart)
+
+            // Over before any output could have played the gun.
+            #expect(engine.qualify(.definiteFalseStart, gunTimeIsTrusted: false, movedBeforeRender: true) == .definiteFalseStart)
+
+            #expect(engine.qualify(.legal, gunTimeIsTrusted: false, movedBeforeRender: false) == .legal)
+            #expect(engine.qualify(.notApplicable, gunTimeIsTrusted: false, movedBeforeRender: false) == .notApplicable)
+        }
 }

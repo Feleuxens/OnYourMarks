@@ -12,6 +12,10 @@ nonisolated struct ScheduledSignal: Equatable, Sendable {
     /// Host time at which the engine renders the buffer's first sample.
     let renderStart: MonotonicTimestamp
 
+    /// Until when stopping the player still takes the signal back without a
+    /// sound. After that the signal counts as out, heard or not.
+    let cancellableUntil: MonotonicTimestamp
+
     /// When the sound's audible onset leaves the output device.
     /// Render start + output latency + onset offset in the file,
     /// widened by how far the route's reported latency can be trusted.
@@ -36,6 +40,11 @@ nonisolated struct SignalTimingBasis: Equatable, Codable, Sendable {
     let calibration: OutputCalibration?
 
     let uncertainty: TimeInterval
+
+    /// A wireless output's latency is only an estimate until it is calibrated.
+    var isCalibrationMissing: Bool {
+        route?.isWireless == true && calibration == nil
+    }
 
     func audibleOnset(renderStart: MonotonicTimestamp) -> TimeEstimate {
         OutputTiming.audibleOnset(
@@ -79,6 +88,14 @@ nonisolated enum OutputTiming {
         2 * ioBufferDuration + 0.005
     }
 
+    /// How long before its render start a scheduled signal can last be
+    /// taken back: the engine renders a cycle before its samples are due,
+    /// so a later stop may let the beginning of the sound through.
+    /// Reasoned like the scheduling lead, not measured.
+    static func cancellationLead(ioBufferDuration: TimeInterval) -> TimeInterval {
+        minimumLead(ioBufferDuration: ioBufferDuration)
+    }
+
     static func uncertainty(
         latency: TimeInterval,
         isWireless: Bool
@@ -90,8 +107,22 @@ nonisolated enum OutputTiming {
     
     /// A calibration replaces the assumption, but never claims more
     /// precision than a wired output has.
-    static func uncertainty(calibrated calibration: OutputCalibration) -> TimeInterval {
-        max(calibration.uncertainty, wiredUncertainty)
+    ///
+    /// The correction was measured against the latency the output reported
+    /// then. If it reports another one now (the calibration records in
+    /// another session category than a start plays in), nothing says
+    /// whether the real delay changed with it, so the difference is added.
+    ///
+    /// - Parameter latency: what the output reports now; nil for the
+    ///   calibration as it was measured.
+    static func uncertainty(calibrated calibration: OutputCalibration, latency: TimeInterval? = nil) -> TimeInterval {
+        let latencyChange = if let latency, let reported = calibration.reportedLatency {
+            abs(latency - reported)
+        } else {
+            0.0
+        }
+
+        return max(calibration.uncertainty, wiredUncertainty) + latencyChange
     }
 
     /// `correction` comes from a calibration of the output, if there is one.

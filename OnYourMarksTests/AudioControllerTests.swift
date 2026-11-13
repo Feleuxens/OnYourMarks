@@ -359,6 +359,18 @@ struct AudioControllerTests {
                 """,
                 named: "Calibration \(output)"
             )
+            
+            // What a start on this output makes of it: the latency reported
+            // in the start's session category against the calibration's.
+            controller.calibrations = [calibration.routeID: calibration]
+            let preflight = try await controller.prepareForStart()
+            Attachment.record(
+                """
+                \(preflight.gunTiming.route?.name ?? "none"): latency at the calibration                 \((calibration.reportedLatency ?? -1) * 1000) ms, at a start \(preflight.gunTiming.outputLatency * 1000) ms,                 calibration applied: \(preflight.gunTiming.calibration != nil),                 uncertainty \(preflight.gunTiming.uncertainty * 1000) ms
+                """,
+                named: "Calibration at a start \(output)"
+            )
+            await controller.deactivateSession()
         } catch CalibrationError.inconsistentClicks(let offsets) {
             let listed = offsets.map { String(format: "%.1f", $0 * 1000) }.joined(separator: ", ")
             Issue.record("Calibration on \(output) inconsistent, offsets: \(listed) ms")

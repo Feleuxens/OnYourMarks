@@ -25,6 +25,12 @@ class FakeSignalPlayer: SignalPlayer {
     var gunDuration: TimeInterval = 0
     /// Added between render start and the audible onset.
     var outputLatency: TimeInterval = 0
+    /// How long before its render start the gun can last be taken back.
+    var cancellationLead: TimeInterval = 0
+    /// What reading the gun back from the render timeline gives: nil as
+    /// scheduled, otherwise this much later. `measuresPlayback` off: nothing.
+    var measuredDelay: TimeInterval = 0
+    var measuresPlayback = true
     
     /// Returned by the preflight, which fails with `preflightError` if set.
     var preflight = AudioPreflight.fake()
@@ -57,6 +63,7 @@ class FakeSignalPlayer: SignalPlayer {
         let scheduled = ScheduledSignal(
             signal: signal,
             renderStart: time,
+            cancellableUntil: MonotonicTimestamp(seconds: time.seconds - cancellationLead),
             audibleOnset: .exact(MonotonicTimestamp(seconds: time.seconds + outputLatency)),
             basis: preflight.gunTiming
         )
@@ -65,7 +72,17 @@ class FakeSignalPlayer: SignalPlayer {
     }
     
     func measuredPlayback(of signal: Signal) -> ScheduledSignal? {
-        pendingSchedule?.signal == signal ? pendingSchedule : nil
+        guard measuresPlayback, let pending = pendingSchedule, pending.signal == signal else { return nil }
+        
+        let renderStart = pending.renderStart.seconds + measuredDelay
+        
+        return ScheduledSignal(
+            signal: signal,
+            renderStart: MonotonicTimestamp(seconds: renderStart),
+            cancellableUntil: pending.cancellableUntil,
+            audibleOnset: .exact(MonotonicTimestamp(seconds: renderStart + outputLatency)),
+            basis: pending.basis
+        )
     }
     
     func stop() {

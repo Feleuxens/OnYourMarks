@@ -6,6 +6,27 @@
 import CoreVideo
 import Vision
 
+/// What the camera's own movement did to a frame.
+nonisolated enum CameraShift: Equatable, Sendable {
+    /// How far the picture's content has shifted since the reference, in
+    /// the normalized upright picture the poses use.
+    case measured(CGPoint)
+
+    /// Not measurable in this frame. Nobody can be judged in it: an older
+    /// shift is no substitute, with it whatever the camera did since
+    /// would be taken for the athletes' movement.
+    case unmeasured
+
+    /// Not measurable for too long. The reference is given up and the
+    /// next frame becomes the new one; positions from before can't be
+    /// compared with those after, so everyone has to become still again.
+    case lost
+
+    var offset: CGPoint? {
+        if case .measured(let offset) = self { offset } else { nil }
+    }
+}
+
 /// Measures how far the whole picture has shifted since a reference frame,
 /// which is what a camera held in the hand does to it.
 ///
@@ -16,42 +37,62 @@ import Vision
 nonisolated final class CameraMotionEstimator: @unchecked Sendable {
     /// A shift beyond this share of the picture is not a hand's tremor but
     /// a pan or a failed measurement; either way nothing to correct by.
+    /// Reasoned, not measured.
     static let maximumOffset: CGFloat = 0.2
 
     /// A copy: holding on to one of the camera's own buffers stalls the
     /// capture (measured: 18 frames in 3 s instead of about 240).
     private var reference: CVPixelBuffer?
-    private var lastOffset = CGPoint.zero
+    private var unmeasuredSince: MonotonicTimestamp?
+
+    /// How long the shift may stay unmeasurable before the reference is
+    /// given up: as long as the tracker waits before it calls an athlete
+    /// hidden. One frame the registration got wrong is passed over; a pan
+    /// stays out of reach of the old reference for good.
+    static let patience: TimeInterval = AthleteTracker.occlusionDelay
 
     /// The next frame becomes the reference.
     func reset() {
         reference = nil
-        lastOffset = .zero
+        unmeasuredSince = nil
     }
 
-    /// How far the content of the frame has shifted against the reference,
-    /// in the normalized upright picture the poses use. Zero for the
-    /// reference itself; the last known shift if this one can't be measured.
-    func offset(in frame: CameraFrame) -> CGPoint {
+    /// The shift of the frame's content against the reference; zero for
+    /// the reference itself.
+    func shift(in frame: CameraFrame) -> CameraShift {
         guard let reference else {
             self.reference = Self.copy(of: frame.pixelBuffer)
-            return .zero
+            unmeasuredSince = nil
+            return .measured(.zero)
         }
 
-        guard let shift = Self.contentShift(from: reference, to: frame.pixelBuffer) else {
-            return lastOffset
+        if let offset = Self.offset(from: reference, to: frame.pixelBuffer) {
+            unmeasuredSince = nil
+            return .measured(offset)
         }
 
-        let offset = Self.pictureOffset(
+        guard let unmeasuredSince else {
+            unmeasuredSince = frame.timestamp
+            return .unmeasured
+        }
+
+        guard frame.timestamp.seconds - unmeasuredSince.seconds > Self.patience else { return .unmeasured }
+
+        reset()
+        return .lost
+    }
+
+    /// Nil if the registration fails or finds a shift too large to correct by.
+    private static func offset(from reference: CVPixelBuffer, to current: CVPixelBuffer) -> CGPoint? {
+        guard let shift = contentShift(from: reference, to: current) else { return nil }
+
+        let offset = pictureOffset(
             ofBufferShift: shift,
-            bufferWidth: CVPixelBufferGetWidth(frame.pixelBuffer),
-            bufferHeight: CVPixelBufferGetHeight(frame.pixelBuffer)
+            bufferWidth: CVPixelBufferGetWidth(current),
+            bufferHeight: CVPixelBufferGetHeight(current)
         )
 
-        if hypot(offset.x, offset.y) <= Self.maximumOffset {
-            lastOffset = offset
-        }
-        return lastOffset
+        return hypot(offset.x, offset.y) <= maximumOffset ? offset : nil
     }
 
     /// A buffer of our own with the same pixels.

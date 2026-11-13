@@ -20,8 +20,9 @@ nonisolated struct TrackingFrame: Equatable, Codable, Sendable {
     let phases: [AthleteID: AthleteStability.Phase]
 
     /// How far the picture had shifted because the camera moved, as it was
-    /// taken out of the joints for the decision. Nil on a tripod. Stored to
-    /// judge the handheld compensation against the video.
+    /// taken out of the joints for the decision. Nil on a tripod, and in a
+    /// handheld frame whose shift could not be measured. Stored to judge
+    /// the handheld compensation against the video.
     let cameraOffset: CGPoint?
 
     init(

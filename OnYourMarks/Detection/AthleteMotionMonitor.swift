@@ -12,8 +12,6 @@ nonisolated struct AthleteMotionMonitor: Sendable {
     private(set) var roster: AthleteRoster?
     private var stability: [AthleteID: AthleteStability] = [:]
     private var trackStates: [AthleteID: AthleteTrackState] = [:]
-    /// Roster athletes in the latest frame.
-    private var visible: Set<AthleteID> = []
     private var wasReady = false
 
     /// Where each roster athlete stands between moving and stable.
@@ -30,10 +28,14 @@ nonisolated struct AthleteMotionMonitor: Sendable {
     /// Whether every athlete that can be seen holds still. A hidden athlete
     /// can't be judged and doesn't hold up the start; neither does an empty
     /// roster.
+    ///
+    /// Hidden is what the tracker calls occluded or lost, not one frame
+    /// without a pose: pose detection misses a moving athlete now and then,
+    /// and each miss would arm the gun for a frame.
     var isReady: Bool {
         guard roster != nil else { return false }
 
-        return stability.allSatisfy { $0.value.phase == .stable || !visible.contains($0.key) }
+        return stability.allSatisfy { $0.value.phase == .stable || trackStates[$0.key] != .tracked }
     }
 
     /// Fixes the roster: every athlete that is tracked now, visible or not.
@@ -52,7 +54,6 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         self.roster = roster
         stability = [:]
         trackStates = [:]
-        visible = Set(members.filter { $0.isVisible }.map { $0.id })
 
         for member in members {
             stability[member.id] = AthleteStability(profile: profile)
@@ -67,7 +68,6 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         roster = nil
         stability = [:]
         trackStates = [:]
-        visible = []
         wasReady = false
     }
 
@@ -82,18 +82,18 @@ nonisolated struct AthleteMotionMonitor: Sendable {
 
     /// Takes the athletes of one frame and returns what happened in it.
     ///
-    /// - Parameter cameraOffset: how far the picture's content has shifted
-    ///   since monitoring began because the camera moved. It is taken out
-    ///   of every joint, so the athletes are judged as if the camera stood still.
+    /// - Parameter camera: what the camera's own movement did to the frame.
+    ///   A measured shift is taken out of every joint, so the athletes are
+    ///   judged as if the camera stood still. Without one nobody is judged
+    ///   in this frame, and once the camera is lost everyone has to become
+    ///   still again: what moved in the picture may have been the camera.
     mutating func process(
         _ athletes: [TrackedAthlete],
-        cameraOffset: CGPoint = .zero,
+        camera: CameraShift = .measured(.zero),
         at time: MonotonicTimestamp
     ) -> [DetectorEvent] {
         var events: [DetectorEvent] = []
         guard roster != nil else { return events }
-
-        visible = []
 
         for athlete in athletes {
             guard let previousState = trackStates[athlete.id] else { continue }
@@ -106,8 +106,7 @@ nonisolated struct AthleteMotionMonitor: Sendable {
             }
 
             // An unseen athlete still has the old pose; it says nothing new.
-            guard athlete.isVisible else { continue }
-            visible.insert(athlete.id)
+            guard athlete.isVisible, let cameraOffset = camera.offset else { continue }
 
             let joints = athlete.pose.joints.mapValues {
                 CGPoint(x: $0.x - cameraOffset.x, y: $0.y - cameraOffset.y)
@@ -128,6 +127,12 @@ nonisolated struct AthleteMotionMonitor: Sendable {
                 events.append(.unsteady(observation))
             case .becameStable, nil:
                 break
+            }
+        }
+
+        if camera == .lost {
+            for id in stability.keys {
+                stability[id]?.resettle()
             }
         }
 

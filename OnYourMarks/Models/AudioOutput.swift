@@ -39,4 +39,8 @@ nonisolated struct OutputCalibration: Codable, Equatable, Sendable {
 
     let clickCount: Int
     let date: Date
+
+    /// The output latency the system reported while the clicks were
+    /// measured. Nil for a calibration stored before this was kept.
+    var reportedLatency: TimeInterval?
 }

@@ -36,8 +36,9 @@ final class CameraController: FrameSource {
     @ObservationIgnored private var isConfigured = false
     @ObservationIgnored private var isStarted = false
 
+    /// Not while the system has taken the camera away: nothing arrives then.
     var isDelivering: Bool {
-        isStarted
+        isStarted && !isInterrupted
     }
     @ObservationIgnored private var device: AVCaptureDevice?
 
@@ -86,7 +87,13 @@ final class CameraController: FrameSource {
         session.addOutput(videoOutput)
 
         // After adding the input, which resets the device's frame durations.
-        selectFormat(on: camera)
+        // Here on the main actor: nothing runs on the session queue yet.
+        format = Self.selectFormat(
+            on: camera,
+            precision: precisionFrameRate,
+            frameRate: CameraFrameRatePolicy.idle,
+            logger: logger
+        )
 
         receiver.setSynchronizationClock(session.synchronizationClock)
         device = camera
@@ -97,13 +104,23 @@ final class CameraController: FrameSource {
         return true
     }
 
-    private func selectFormat(on camera: AVCaptureDevice) {
+    /// Picks the format that reaches the precision rate and sets the given
+    /// rate within it. Returns the format the device has afterwards.
+    ///
+    /// Called where the device is configured: on the main actor before the
+    /// session first runs, on the session queue from then on.
+    private nonisolated static func selectFormat(
+        on camera: AVCaptureDevice,
+        precision: Double,
+        frameRate: Double,
+        logger: Logger
+    ) -> CameraFormatDescriptor? {
         let formats = camera.formats
         let descriptors = formats.map(CameraFormatDescriptor.init)
 
-        guard let index = CameraFormatSelector.bestIndex(among: descriptors, frameRate: precisionFrameRate) else {
+        guard let index = CameraFormatSelector.bestIndex(among: descriptors, frameRate: precision) else {
             logger.error("The camera offers no formats")
-            return
+            return nil
         }
 
         let chosen = descriptors[index]
@@ -111,15 +128,12 @@ final class CameraController: FrameSource {
         do {
             try camera.lockForConfiguration()
             camera.activeFormat = formats[index]
-            Self.setFrameRate(CameraFrameRatePolicy.idle, on: camera)
+            setFrameRate(frameRate, on: camera)
             camera.unlockForConfiguration()
         } catch {
             logger.error("Could not select the camera format: \(error.localizedDescription, privacy: .public)")
-            format = CameraFormatDescriptor(camera.activeFormat)
-            return
+            return CameraFormatDescriptor(camera.activeFormat)
         }
-
-        format = chosen
 
         logger.info(
             """
@@ -130,14 +144,19 @@ final class CameraController: FrameSource {
             """
         )
 
-        if chosen.maxFrameRate < precisionFrameRate {
-            logger.notice("No format reaches \(self.precisionFrameRate, format: .fixed(precision: 0)) fps")
+        if chosen.maxFrameRate < precision {
+            logger.notice("No format reaches \(precision, format: .fixed(precision: 0)) fps")
         }
+        return chosen
     }
 
     /// Changes the precision rate. A configured camera picks its format
     /// anew, which interrupts a running stream for a moment, so this is for
     /// settings, not for a start in progress.
+    ///
+    /// The format changes on the session queue, in line with starting,
+    /// stopping and the frame rates, and off the main actor, which a format
+    /// change would hold up. `format` follows once it is done.
     func setPrecisionFrameRate(_ frameRate: Double) {
         guard frameRate != precisionFrameRate else { return }
 
@@ -145,12 +164,27 @@ final class CameraController: FrameSource {
 
         guard isConfigured, let device else { return }
 
-        session.beginConfiguration()
-        selectFormat(on: device)
-        session.commitConfiguration()
+        let modeRate = CameraFrameRatePolicy.frameRate(for: mode, pressure: pressure, precision: frameRate)
 
-        applyFrameRate()
-        reportState()
+        // Neither is Sendable; from here on both are only configured on
+        // the serial session queue.
+        nonisolated(unsafe) let captureDevice = device
+        nonisolated(unsafe) let session = self.session
+        let logger = self.logger
+
+        sessionQueue.async { [weak self] in
+            session.beginConfiguration()
+            let chosen = Self.selectFormat(on: captureDevice, precision: frameRate, frameRate: modeRate, logger: logger)
+            session.commitConfiguration()
+
+            Task { @MainActor in
+                // A later change may have overtaken this one.
+                guard let self, self.precisionFrameRate == frameRate else { return }
+
+                self.format = chosen
+                self.reportState()
+            }
+        }
     }
 
     // MARK: - Running

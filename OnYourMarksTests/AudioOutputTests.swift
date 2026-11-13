@@ -156,6 +156,28 @@ struct CalibratedTimingTests {
         #expect(OutputTiming.uncertainty(calibrated: .fake(uncertainty: 0.0005)) == OutputTiming.wiredUncertainty)
         #expect(OutputTiming.uncertainty(calibrated: .fake(uncertainty: 0.006)) == 0.006)
     }
+    
+    @Test
+    func aLatencyReportedDifferentlyThanAtTheCalibrationWidensIt() {
+        var calibration = OutputCalibration.fake(uncertainty: 0.006)
+        
+        // Nothing to compare with: as measured.
+        #expect(OutputTiming.uncertainty(calibrated: calibration, latency: 0.25) == 0.006)
+        
+        calibration.reportedLatency = 0.18
+        #expect(OutputTiming.uncertainty(calibrated: calibration, latency: 0.18) == 0.006)
+        #expect(OutputTiming.uncertainty(calibrated: calibration, latency: 0.25) == 0.006 + (0.25 - 0.18))
+        #expect(OutputTiming.uncertainty(calibrated: calibration, latency: 0.15) == 0.006 + (0.18 - 0.15))
+    }
+    
+    @Test
+    func aCalibrationStoredWithoutItsLatencyStillLoads() throws {
+        let stored = Data(
+            #"{"routeID":"a","routeName":"A","isBuiltInSpeaker":false,"correction":0.1,"uncertainty":0.002,"clickCount":6,"date":0}"#.utf8
+        )
+        
+        #expect(try JSONDecoder().decode(OutputCalibration.self, from: stored).reportedLatency == nil)
+    }
 }
 
 @MainActor

@@ -385,10 +385,10 @@ struct AthleteMotionMonitorTests {
         }
 
         @discardableResult
-        mutating func step(_ poses: [DetectedPose], cameraOffset: CGPoint = .zero) -> [DetectorEvent] {
+        mutating func step(_ poses: [DetectedPose], camera: CameraShift = .measured(.zero)) -> [DetectorEvent] {
             now += frame
             let update = monitor.process(
-                tracker.update(with: poses, at: time(now)), cameraOffset: cameraOffset, at: time(now)
+                tracker.update(with: poses, at: time(now)), camera: camera, at: time(now)
             )
             if let readiness = update.readiness {
                 reportedReadiness.append(readiness)
@@ -460,6 +460,23 @@ struct AthleteMotionMonitorTests {
 
         _ = monitor.begin(with: [], profile: .block)
         #expect(monitor.isReady)
+    }
+
+    @Test
+    func oneFrameWithoutAPoseDoesNotMakeAMovingAthleteReady() {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+
+        // The right athlete keeps shifting about, and pose detection
+        // misses them in a frame now and then.
+        for step in 0..<80 {
+            let right = pose(at: 0.6, shiftedBy: step % 20 < 10 ? 0 : 0.05)
+            scene.step(step % 7 == 6 ? [pose(at: 0.2)] : [pose(at: 0.2), right])
+        }
+
+        #expect(scene.monitor.phases[athletes[0].id] == .stable)
+        #expect(!scene.monitor.isReady)
+        #expect(scene.reportedReadiness.isEmpty)
     }
 
     @Test
@@ -559,10 +576,45 @@ struct AthleteMotionMonitorTests {
         let shaken = [pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.08)]
 
         var compensated = scene
-        let update = compensated.step(shaken, cameraOffset: CGPoint(x: 0.08, y: 0))
+        let update = compensated.step(shaken, camera: .measured(CGPoint(x: 0.08, y: 0)))
         #expect(update.movements.isEmpty)
 
         #expect(scene.step(shaken).movements.count == 2)
+    }
+
+    @Test
+    func aCameraMovementThatCannotBeMeasuredIsNobodysStart() {
+        var scene = Scene()
+        let athletes = scene.begin([0.2, 0.6])
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+        #expect(scene.monitor.isReady)
+
+        // A pan: the whole picture shifts as far as a start would move a
+        // body, and further with every frame.
+        for step in 1...5 {
+            let shift = CGFloat(step) * 0.06
+            let update = scene.step(
+                [pose(at: 0.2, shiftedBy: shift), pose(at: 0.6, shiftedBy: shift)],
+                camera: step < 5 ? .unmeasured : .lost
+            )
+
+            #expect(update.movements.isEmpty)
+            #expect(update.unsteady.isEmpty)
+
+            // A frame or two without a measurement changes nothing yet.
+            #expect(scene.monitor.isReady == (step < 5))
+        }
+
+        // Once the camera is lost nobody is taken for still: a pending
+        // gun is taken back.
+        #expect(!scene.monitor.isReady)
+        #expect(scene.reportedReadiness == [true, false])
+        #expect(athletes.allSatisfy { scene.monitor.phases[$0.id] == .moving })
+
+        // Where the camera came to rest, measured against a new picture,
+        // the athletes become still again without having moved.
+        scene.settle([pose(at: 0.2, shiftedBy: 0.3), pose(at: 0.6, shiftedBy: 0.3)])
+        #expect(scene.monitor.isReady)
     }
 
     @Test

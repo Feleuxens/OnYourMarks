@@ -78,6 +78,22 @@ nonisolated struct DecisionEngine: Sendable {
         
         return .uncertain
     }
+    
+    /// A reaction is only held against an athlete when the time the gun
+    /// was heard is known, not assumed. A movement that was over before
+    /// the gun was even rendered needs no such time: no output plays a
+    /// sound before it gets it.
+    func qualify(
+        _ decision: StartDecision,
+        gunTimeIsTrusted: Bool,
+        movedBeforeRender: Bool
+    ) -> StartDecision {
+        guard decision == .definiteFalseStart, !gunTimeIsTrusted, !movedBeforeRender else {
+            return decision
+        }
+        
+        return .uncertain
+    }
 }
 
 
