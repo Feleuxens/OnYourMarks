@@ -222,6 +222,36 @@ struct RecordingStoreTests {
     }
     
     @Test
+    func whatTheSamplerSawIsStoredBesideTheRest() throws {
+        let store = RecordingStore.scratch()
+        let recording = recording()
+        let motion = MotionRecord(
+            athleteID: AthleteID(),
+            region: CGRect(x: 0.1, y: 0.2, width: 0.3, height: 0.5),
+            samples: [
+                MotionSample(time: MonotonicTimestamp(seconds: 9), cells: [0, 17, 255]),
+                MotionSample(time: MonotonicTimestamp(seconds: 9.1), cells: [1, 2, 3])
+            ]
+        )
+        
+        try Data("video".utf8).write(to: try store.prepare(recording.id))
+        try store.write(recording, tracking: [], motion: [motion])
+        
+        #expect(try store.motion(of: recording.id, in: .temporary) == [motion])
+        #expect(store.files(of: recording.id, in: .temporary).map { $0.lastPathComponent }.last == RecordingStore.motionFileName)
+    }
+    
+    @Test
+    func aRecordingWithoutSamplesHasNoFileForThem() throws {
+        let store = RecordingStore.scratch()
+        let recording = recording()
+        
+        try self.store(recording, in: store)
+        
+        #expect(try store.motion(of: recording.id, in: .temporary).isEmpty)
+    }
+    
+    @Test
     func aRecordingWithoutItsVideoIsPassedOver() throws {
         let store = RecordingStore.scratch()
         let recording = recording()
@@ -279,15 +309,16 @@ extension VideoRecordingTests {
         /// tests run beside it.
         private let patience = Duration.seconds(30)
     
-        private func makeController(tail: Duration = .zero) -> StartRecordingController {
-            StartRecordingController(source: source, store: store, tail: tail)
+        private func makeController() -> StartRecordingController {
+            StartRecordingController(source: source, store: store)
         }
     
         /// Records a start of a few frames and ends it with the given outcome.
         private func record(
             with controller: StartRecordingController,
             outcome: StartSessionOutcome = .completed,
-            from time: TimeInterval = 9.5
+            from time: TimeInterval = 9.5,
+            tail: TimeInterval = 0
         ) async throws -> StartSession {
             try #require(controller.beginRecording())
         
@@ -297,7 +328,7 @@ extension VideoRecordingTests {
             controller.record(TrackingFrame(time: MonotonicTimestamp(seconds: time), athletes: [.fake()]))
         
             let session = recordedSession(outcome: outcome)
-            controller.endRecording(session: session, results: [])
+            controller.endRecording(session: session, results: [], tail: tail)
             return session
         }
     
@@ -389,9 +420,9 @@ extension VideoRecordingTests {
     
         @Test
         func aCompletedStartIsRecordedALittleLonger() async throws {
-            let controller = makeController(tail: .seconds(60))
+            let controller = makeController()
         
-            _ = try await record(with: controller)
+            _ = try await record(with: controller, tail: 60)
         
             // Still taking frames and tracking data after the run.
             #expect(source.handler != nil)
@@ -411,10 +442,10 @@ extension VideoRecordingTests {
     
         @Test
         func aStartDuringTheTailEndsIt() async throws {
-            let controller = makeController(tail: .seconds(60))
+            let controller = makeController()
         
-            let first = try await record(with: controller)
-            let second = try await record(with: controller, from: 20)
+            let first = try await record(with: controller, tail: 60)
+            let second = try await record(with: controller, from: 20, tail: 60)
         
             controller.flush()
             await waitUntil(timeout: patience) { controller.last?.session == second && !controller.isFinishing }
@@ -425,9 +456,9 @@ extension VideoRecordingTests {
     
         @Test
         func aFalseStartHasNoTail() async throws {
-            let controller = makeController(tail: .seconds(60))
+            let controller = makeController()
         
-            _ = try await record(with: controller, outcome: .falseStart)
+            _ = try await record(with: controller, outcome: .falseStart, tail: 60)
         
             #expect(source.handler == nil)
             await waitUntil(timeout: patience) { controller.last != nil }
@@ -626,6 +657,93 @@ struct EngineRecordingTests {
         #expect(recorder.ended.map { $0.session.outcome } == [.completed])
     }
     
+    /// The first steps are what athletes want to see: the recording and
+    /// the precision rate go on after the run, counted from the gun.
+    @Test
+    func aCompletedStartIsFilmedOnAtThePrecisionRate() async throws {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 0.4
+        player.clock = clock
+        let detector = FakeMovementDetector()
+        detector.clock = clock
+        let recorder = FakeStartRecorder()
+        let engine = StarterEngine(
+            player: player, movementDetector: detector, recorder: recorder, clock: clock, decisionEngine: DecisionEngine()
+        )
+        
+        var config = StartConfig.instant
+        config.blockTimeToStartMin = 0.5
+        config.blockTimeToStartMax = 0.5
+        config.recordingAfterStart = 2.5
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        // The hold and the gun's sound.
+        await clock.advance(by: 0.9)
+        #expect(!engine.isRunning)
+        
+        // 0.4 s of the 2.5 s have passed with the gun's sound.
+        let ended = try #require(recorder.ended.first)
+        #expect(ended.session.outcome == .completed)
+        #expect(abs(ended.tail - 2.1) < 0.000_001)
+        #expect(detector.isInPrecisionWindow)
+        
+        await clock.advance(by: 2.09)
+        #expect(detector.isInPrecisionWindow)
+        
+        await clock.advance(by: 0.02)
+        #expect(!detector.isInPrecisionWindow)
+        #expect(detector.precisionEndCount == 1)
+    }
+    
+    @Test
+    func theNextStartEndsTheFilmingOfTheOneBefore() async throws {
+        let (engine, detector, recorder, base) = makeEngine()
+        var config = base
+        config.recordingAfterStart = 6
+        
+        engine.start(config: config)
+        await waitUntil { !engine.isRunning }
+        #expect(detector.isInPrecisionWindow)
+        
+        config.blockTimeToReady = 10
+        engine.start(config: config)
+        #expect(!detector.isInPrecisionWindow)
+        
+        engine.abort()
+        #expect(recorder.ended.count == 1)
+    }
+    
+    @Test
+    func aFalseStartIsNotFilmedOn() async throws {
+        let (engine, detector, recorder, config) = makeEngine(holdTime: 10)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        detector.emitMovement(at: 2)
+        await waitUntil { !engine.isRunning }
+        
+        #expect(recorder.ended.map { $0.tail } == [0])
+        #expect(!detector.isInPrecisionWindow)
+    }
+    
+    @Test
+    func whatTheSamplerSawGoesToTheRecorder() async throws {
+        let (engine, detector, recorder, config) = makeEngine(holdTime: 10)
+        let motion = MotionRecord(athleteID: AthleteID(), region: .zero, samples: [])
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        detector.onEvent?(.motionSampled(motion))
+        engine.abort()
+        
+        #expect(recorder.motion == [motion])
+    }
+    
     @Test
     func nothingIsRecordedWhenSwitchedOff() async {
         let (engine, _, recorder, base) = makeEngine()
@@ -707,7 +825,7 @@ extension VideoRecordingTests {
         @Test(.enabled(if: seedRequested))
         func seedsAStartIntoTheLibrary() async throws {
             let source = FakeFrameSource()
-            let controller = StartRecordingController(source: source, tail: .zero)
+            let controller = StartRecordingController(source: source)
             let ids = [AthleteID(), AthleteID()]
             let quality = TrackingQuality(state: .tracked, jointCoverage: 1, confidence: 0.9, continuity: 1)
             let gun = 100.0
@@ -768,7 +886,8 @@ extension VideoRecordingTests {
                         reaction: moved(0.15).duration(since: heard), decision: .legal,
                         trackingQuality: quality, isRefined: true
                     ),
-                ]
+                ],
+                tail: 0
             )
         
             await waitUntil(timeout: .seconds(30)) { controller.last != nil }

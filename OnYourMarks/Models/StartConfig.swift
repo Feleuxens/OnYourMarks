@@ -9,6 +9,7 @@ nonisolated struct StartConfig: Codable, Sendable {
     static let readyRange: ClosedRange<Double> = 0...20
     static let setRange: ClosedRange<Double> = 0...30
     static let startRange: ClosedRange<Double> = 0...10
+    static let recordingAfterStartRange: ClosedRange<Double> = 0...6
     
     var blockTimeToReady: Double = 2 {
         didSet { blockTimeToReady = blockTimeToReady.clamped(to: Self.readyRange) }
@@ -50,6 +51,11 @@ nonisolated struct StartConfig: Codable, Sendable {
     var frameRate: CameraFrameRate = .fps120
     /// Whether a start with the camera on is recorded for the review.
     var recordsVideo = true
+    /// How long after the gun a recorded start is still filmed, at the
+    /// precision rate: the first steps are what athletes want to look at.
+    var recordingAfterStart: Double = 3 {
+        didSet { recordingAfterStart = recordingAfterStart.clamped(to: Self.recordingAfterStartRange) }
+    }
 
     static let standard = StartConfig()
     
@@ -57,7 +63,7 @@ nonisolated struct StartConfig: Codable, Sendable {
     init() {}
     
     private enum CodingKeys: String, CodingKey {
-        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate, recordsVideo
+        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate, recordsVideo, recordingAfterStart
 }
     
     init(from decoder: Decoder) throws {
@@ -80,6 +86,7 @@ nonisolated struct StartConfig: Codable, Sendable {
         cameraMount = try container.decodeIfPresent(CameraMount.self, forKey: .cameraMount) ?? defaults.cameraMount
         frameRate = (try? container.decodeIfPresent(CameraFrameRate.self, forKey: .frameRate)) ?? defaults.frameRate
         recordsVideo = try container.decodeIfPresent(Bool.self, forKey: .recordsVideo) ?? defaults.recordsVideo
+        recordingAfterStart = try container.decodeIfPresent(Double.self, forKey: .recordingAfterStart) ?? defaults.recordingAfterStart
 
         normalize()
     }
@@ -105,6 +112,9 @@ nonisolated struct StartConfig: Codable, Sendable {
 
         standingTimeToStartMax =
             standingTimeToStartMax.clamped(to: Self.startRange)
+
+        recordingAfterStart =
+            recordingAfterStart.clamped(to: Self.recordingAfterStartRange)
     }
 }
 nonisolated extension Comparable {

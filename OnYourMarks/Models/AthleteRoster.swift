@@ -73,7 +73,8 @@ nonisolated struct MovementObservation: Equatable, Sendable {
 nonisolated struct OnsetRefinement: Equatable, Codable, Sendable {
     let athleteID: AthleteID
 
-    /// Between two frames that follow each other.
+    /// From the last frame that still looked like rest to the first in
+    /// which the movement was certain.
     let onset: TimeEstimate
 
     /// Frames missing between those two; they have widened the interval.

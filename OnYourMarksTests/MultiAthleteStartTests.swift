@@ -60,6 +60,85 @@ struct MultiAthleteStartTests {
         engine.abort()
     }
     
+    /// An engine on a clock of the test's, with a gun of 0.4 s.
+    private func makeTimedEngine(
+        athletes: [AthleteID]
+    ) -> (StarterEngine, FakeSignalPlayer, FakeMovementDetector, StartConfig, ManualClock) {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 0.4
+        player.clock = clock
+        
+        let detector = FakeMovementDetector()
+        detector.roster = roster(athletes)
+        detector.clock = clock
+        
+        var config = StartConfig.instant
+        config.blockTimeToStartMin = 0.5
+        config.blockTimeToStartMax = 0.5
+        
+        let engine = StarterEngine(player: player, movementDetector: detector, clock: clock, decisionEngine: DecisionEngine())
+        return (engine, player, detector, config, clock)
+    }
+    
+    /// The gun's sound is over long before a slow start reaches the pose
+    /// threshold; on the device a standing start took 0.52 s.
+    @Test
+    func aReactionAfterTheGunsSoundIsStillMeasured() async throws {
+        let ids = [AthleteID(), AthleteID()]
+        let (engine, player, detector, config, clock) = makeTimedEngine(athletes: ids)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        await clock.advance(by: 0.5)
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        await clock.advance(by: 0.6)
+        #expect(engine.isRunning)
+        #expect(engine.state == .start)
+        
+        detector.emitMovement(at: gun + 0.52, athlete: ids[0], quality: good)
+        #expect(engine.isRunning)
+        
+        // The last athlete's movement ends the run.
+        detector.emitMovement(at: gun + 0.58, athlete: ids[1], quality: good)
+        await waitUntil { !engine.isRunning }
+        
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(engine.athleteResults.map { $0.decision } == [.legal, .legal])
+        #expect(abs((engine.athleteResults.first?.reaction?.best ?? 0) - 0.52) < 0.000_001)
+    }
+    
+    @Test
+    func theRunEndsWhenNobodyMovesWithinTheReactionWindow() async throws {
+        let (engine, _, _, config, clock) = makeTimedEngine(athletes: [AthleteID()])
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        await clock.advance(by: 0.5 + engine.reactionWindow - 0.01)
+        #expect(engine.isRunning)
+        
+        await clock.advance(by: 0.02)
+        #expect(!engine.isRunning)
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(engine.athleteResults.isEmpty)
+    }
+    
+    @Test
+    func withoutAthletesTheRunEndsWithTheGunsSound() async throws {
+        let (engine, _, _, config, clock) = makeTimedEngine(athletes: [])
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        await clock.advance(by: 0.5 + 0.39)
+        #expect(engine.isRunning)
+        
+        await clock.advance(by: 0.02)
+        #expect(!engine.isRunning)
+    }
+    
     @Test
     func eachAthleteGetsTheirOwnReaction() async throws {
         let ids = [AthleteID(), AthleteID()]
@@ -388,6 +467,37 @@ struct MultiAthleteStartTests {
         #expect(engine.athleteResults.first?.decision == .legal)
         
         engine.abort()
+    }
+    
+    /// Found afterwards, so it is shown and nobody is called back.
+    @Test
+    func aStandingStartFoundToBeginBeforeTheGunIsMarkedNotRecalled() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, base) = makeEngine(athletes: ids, holdTime: 0)
+        var config = base
+        config.startType = .standing
+        config.standingTimeToReady = 0
+        config.standingTimeToStartMin = 0
+        config.standingTimeToStartMax = 0
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        // Poses saw the movement after the gun.
+        detector.emitMovement(at: gun + 0.23, since: gun + 0.155, athlete: ids[0], quality: good)
+        #expect(engine.athleteResults.first?.decision == .legal)
+        
+        detector.emitRefinement(from: gun - 0.093, to: gun - 0.026, athlete: ids[0])
+        
+        let result = try #require(engine.athleteResults.first)
+        #expect(result.decision == .definiteFalseStart)
+        #expect(try #require(result.reaction).latest < 0)
+        #expect(events(engine).contains { $0.kind == .decisionRevised(.definiteFalseStart) })
+        #expect(player.recallCount == 0)
+        
+        await waitUntil { !engine.isRunning }
+        #expect(engine.lastSession?.outcome == .completed)
     }
     
     @Test

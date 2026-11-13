@@ -48,17 +48,22 @@ nonisolated struct AthleteStability: Sendable {
     private var unsteadyReported = false
     private var hasStarted = false
 
-    /// The last frame, and the last one that showed the athlete at rest.
-    private var lastFrameTime: MonotonicTimestamp?
-    private var lastStillTime: MonotonicTimestamp?
+    /// How far the body was from the resting pose in the latest frames,
+    /// back to `unsteadyDelay` before the last of them: a start takes no
+    /// longer than that. An athlete who was hidden has only that last one.
+    private var recent: [(time: MonotonicTimestamp, movement: CGFloat)] = []
 
     /// When the movement began, as far as poses can tell; set with `.started`.
     ///
     /// It began after the last frame that showed the athlete at rest and
     /// had certainly begun in the frame that crossed the threshold. The
-    /// best guess is the first frame outside the still tolerance. A
-    /// movement still inside the tolerance can't be told from rest, so the
-    /// true beginning may lie a little before the interval.
+    /// best guess is the first frame after rest. A movement still inside
+    /// the tolerance can't be told from rest, so the true beginning may lie
+    /// a little before the interval.
+    ///
+    /// Rest is where the athlete was just before, not only the resting
+    /// pose: one who has swayed or leaned out of the tolerance and starts
+    /// from there began to start there, not when they left the tolerance.
     private(set) var onset: TimeEstimate?
 
     /// The resting pose, once stable.
@@ -110,8 +115,7 @@ nonisolated struct AthleteStability: Sendable {
             CGPoint(x: $0.sum.x / CGFloat($0.count), y: $0.sum.y / CGFloat($0.count))
         }
         phase = .stable
-        lastFrameTime = time
-        lastStillTime = time
+        recent = [(time, 0)]
         return .becameStable
     }
 
@@ -122,22 +126,18 @@ nonisolated struct AthleteStability: Sendable {
         at time: MonotonicTimestamp
     ) -> Event? {
         let movement = Self.movement(of: joints, from: reference, weights: profile.regionWeights, aspectRatio: aspectRatio)
-        let previousFrame = lastFrameTime ?? time
-        lastFrameTime = time
 
         if movement > profile.movementThreshold {
             hasStarted = true
-            onset = TimeEstimate(
-                best: departedAt ?? time,
-                earliest: min(lastStillTime ?? previousFrame, departedAt ?? time),
-                latest: time
-            )
+            onset = beginning(ofCrossingAt: time)
             return .started
         }
 
+        recent.removeAll { time.seconds - $0.time.seconds > profile.unsteadyDelay }
+        recent.append((time, movement))
+
         guard movement > profile.stillTolerance else {
             departedAt = nil
-            lastStillTime = time
             return nil
         }
 
@@ -151,6 +151,25 @@ nonisolated struct AthleteStability: Sendable {
             return .unsteady
         }
         return nil
+    }
+
+    /// Where the rise that crossed the threshold began: after the last of
+    /// the recent frames that was no further out than the athlete had been
+    /// at rest in them.
+    private func beginning(ofCrossingAt time: MonotonicTimestamp) -> TimeEstimate {
+        guard let lowest = recent.map({ $0.movement }).min() else { return .exact(time) }
+
+        // Half the tolerance above the lowest: the jitter of the pose
+        // detection, which the tolerance has to stay above.
+        let rest = max(profile.stillTolerance, lowest + profile.stillTolerance / 2)
+
+        guard let still = recent.lastIndex(where: { $0.movement <= rest }) else { return .exact(time) }
+
+        return TimeEstimate(
+            best: still + 1 < recent.count ? recent[still + 1].time : time,
+            earliest: recent[still].time,
+            latest: time
+        )
     }
 
     private mutating func accumulate(_ joints: Joints) {

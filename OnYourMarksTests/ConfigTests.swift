@@ -89,6 +89,21 @@ struct ConfigTests {
     }
 
     @Test
+    func theRecordingAfterTheStartStaysInItsRangeAndHasADefault() throws {
+        var config = StartConfig.standard
+        config.recordingAfterStart = 60
+        #expect(config.recordingAfterStart == StartConfig.recordingAfterStartRange.upperBound)
+
+        config.recordingAfterStart = 4
+        let restored = try JSONDecoder().decode(StartConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.recordingAfterStart == 4)
+
+        // Stored before the setting existed.
+        let old = try JSONDecoder().decode(StartConfig.self, from: Data("{}".utf8))
+        #expect(old.recordingAfterStart == StartConfig.standard.recordingAfterStart)
+    }
+
+    @Test
     func storeRoundTripsConfig() {
         let (store, _) = makeStore()
 

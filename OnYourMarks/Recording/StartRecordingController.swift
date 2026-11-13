@@ -25,10 +25,6 @@ final class StartRecordingController: StartRecorder {
     @ObservationIgnored private let source: FrameSource
     @ObservationIgnored private let store: RecordingStore
 
-    /// How long the camera is recorded beyond a completed start. The run
-    /// ends with the gun's sound, when the athletes have barely left.
-    @ObservationIgnored private let tail: Duration
-
     @ObservationIgnored private var capture: Capture?
     @ObservationIgnored private var tailTask: Task<Void, Never>?
     private var finishing = 0
@@ -47,6 +43,7 @@ final class StartRecordingController: StartRecorder {
         let date: Date
         let writer: VideoFileWriter
         var tracking: [TrackingFrame] = []
+        var motion: [MotionRecord] = []
         var session: StartSession?
         var results: [AthleteStartResult] = []
 
@@ -57,10 +54,9 @@ final class StartRecordingController: StartRecorder {
         }
     }
 
-    init(source: FrameSource, store: RecordingStore = RecordingStore(), tail: Duration = .seconds(1)) {
+    init(source: FrameSource, store: RecordingStore = RecordingStore()) {
         self.source = source
         self.store = store
-        self.tail = tail
 
         last = store.recordings(in: .temporary).first
         saved = store.recordings(in: .library)
@@ -93,19 +89,23 @@ final class StartRecordingController: StartRecorder {
         capture?.tracking.append(frame)
     }
 
-    func endRecording(session: StartSession, results: [AthleteStartResult]) {
+    func record(_ motion: MotionRecord) {
+        capture?.motion.append(motion)
+    }
+
+    func endRecording(session: StartSession, results: [AthleteStartResult], tail: TimeInterval) {
         guard capture != nil, capture?.session == nil else { return }
 
         capture?.session = session
         capture?.results = results
 
-        guard session.outcome == .completed, tail > .zero else {
+        guard session.outcome == .completed, tail > 0 else {
             conclude()
             return
         }
 
-        tailTask = Task { [weak self, tail] in
-            try? await Task.sleep(for: tail)
+        tailTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(tail))
 
             guard !Task.isCancelled else { return }
             self?.conclude()
@@ -165,7 +165,7 @@ final class StartRecordingController: StartRecorder {
             }
 
             let kept = active.union(last.map { [$0.id] } ?? [])
-            try await Self.write(recording, tracking: capture.tracking, keeping: kept, in: store)
+            try await Self.write(recording, capture: capture, keeping: kept, in: store)
         } catch {
             logger.error("Could not store the recording: \(error.localizedDescription, privacy: .public)")
             store.delete(capture.id, in: .temporary)
@@ -198,11 +198,11 @@ final class StartRecordingController: StartRecorder {
     @concurrent
     private nonisolated static func write(
         _ recording: StartRecording,
-        tracking: [TrackingFrame],
+        capture: Capture,
         keeping active: Set<UUID>,
         in store: RecordingStore
     ) async throws {
-        try store.write(recording, tracking: tracking)
+        try store.write(recording, tracking: capture.tracking, motion: capture.motion)
         store.keepOnly(active.union([recording.id]))
     }
 
@@ -233,7 +233,8 @@ final class StartRecordingController: StartRecorder {
         store.videoURL(of: recording.id, in: location(of: recording))
     }
 
-    /// The video, the start's record and the tracking data, for sharing.
+    /// The video, the start's record, the tracking data and what the
+    /// sampler saw, for sharing.
     func files(of recording: StartRecording) -> [URL] {
         store.files(of: recording.id, in: location(of: recording))
     }

@@ -38,6 +38,13 @@ final class StarterEngine {
     private var recordsVideo = false
     private var isRecording = false
     
+    /// How long after the gun a recording goes on, at the precision rate.
+    private var recordingAfterStart: TimeInterval = 0
+    
+    /// Ends the precision window once a recording has followed the athletes
+    /// for that long. The run is over by then.
+    private var followThrough: Task<Void, Never>?
+    
     private let clock: MonotonicClock
     private let decisionEngine: DecisionEngine
     
@@ -84,6 +91,12 @@ final class StarterEngine {
     /// right on top of the movement draws a false start. Reasoned, not
     /// measured: the shortest hold a starter would give.
     var minimumHoldAfterDisturbance: TimeInterval = 1
+    
+    /// How long after the gun the athletes are watched for their start.
+    /// The gun's sound is over long before a slow one: the first standing
+    /// start recorded on the device reached the pose threshold 0.52 s after
+    /// the gun. Whoever hasn't moved by now is not starting. Reasoned.
+    var reactionWindow: TimeInterval = 1.5
     
     /// The sleep the sequence is in while it waits for the athletes or for
     /// the gun; cancelled to wake it early.
@@ -160,8 +173,14 @@ final class StarterEngine {
         wakeRequested = false
         wasWokenEarly = false
         monitoringActive = false
-        precisionWindowActive = false
+        
+        // The start before this one may still be followed by its recording.
+        followThrough?.cancel()
+        followThrough = nil
+        endPrecisionWindow()
+        
         recordsVideo = config.recordsVideo
+        recordingAfterStart = config.recordingAfterStart
         isRecording = false
         
         let profile = config.startType.profile
@@ -211,9 +230,22 @@ final class StarterEngine {
         
         sequenceTask = nil
         
+        // The athletes of a completed start are filmed on, as finely as before.
+        let recordingEnd = outcome == .completed ? recordingContinuesUntil : nil
+        
         player.stop()
         stopMovementMonitoring()
-        endPrecisionWindow()
+        
+        if let recordingEnd {
+            followThrough = Task { [weak self] in
+                await self?.clock.sleep(until: recordingEnd)
+                
+                guard !Task.isCancelled else { return }
+                self?.endPrecisionWindow()
+            }
+        } else {
+            endPrecisionWindow()
+        }
         
         gunTime = nil
         scheduledGun = nil
@@ -229,10 +261,22 @@ final class StarterEngine {
         finalizeSession(outcome: outcome)
         
         if wasRecording, let lastSession {
-            recorder?.endRecording(session: lastSession, results: athleteResults)
+            recorder?.endRecording(
+                session: lastSession,
+                results: athleteResults,
+                tail: recordingEnd.map { max(0, $0.seconds - clock.now().seconds) } ?? 0
+            )
         }
         
         onRunEnded?()
+    }
+    
+    /// Until when the recording of this start goes on. Nil before the gun
+    /// and without a recording.
+    private var recordingContinuesUntil: MonotonicTimestamp? {
+        guard isRecording, let gunTime else { return nil }
+        
+        return MonotonicTimestamp(seconds: gunTime.best.seconds + recordingAfterStart)
     }
     
     private func handle(_ event: DetectorEvent) {
@@ -264,6 +308,9 @@ final class StarterEngine {
             // Also after the run: the recorder may still be showing how
             // the start went on.
             recorder?.record(frame)
+            
+        case .motionSampled(let motion):
+            recorder?.record(motion)
         }
     }
     
@@ -476,7 +523,14 @@ final class StarterEngine {
             guard everyAthleteHasMoved(after: result) else { return }
             
             stopMovementMonitoring()
-            endPrecisionWindow()
+            
+            // A recording keeps the precision rate for the first steps.
+            if recordingContinuesUntil == nil {
+                endPrecisionWindow()
+            }
+            
+            // Nobody is left to wait for after the gun.
+            wakeSequence()
         }
     }
     
@@ -575,6 +629,7 @@ final class StarterEngine {
                 guard await sleep(for: measureAfter) else { return .cancelled }
                 recordMeasuredGun()
                 guard await sleep(for: duration - measureAfter) else { return .cancelled }
+                guard await waitForReactions() else { return .cancelled }
                 
             default:
                 if let signal = phase.signal {
@@ -589,6 +644,21 @@ final class StarterEngine {
             }
         }
         return .completed
+    }
+    
+    /// Keeps the run going after the gun's sound until every athlete on the
+    /// roster has moved or the reaction window is over. Without a roster
+    /// there is no one to wait for. False if the run was cancelled.
+    private func waitForReactions() async -> Bool {
+        guard let gunTime, roster?.entries.isEmpty == false else { return true }
+        
+        let end = MonotonicTimestamp(seconds: gunTime.best.seconds + reactionWindow)
+        
+        // The last athlete's movement ends the monitoring and wakes this.
+        while monitoringActive, clock.now() < end {
+            guard await sleep(until: end, wakeable: true) else { return false }
+        }
+        return true
     }
     
     /// Waits until the athletes hold still, then puts the gun on the audio

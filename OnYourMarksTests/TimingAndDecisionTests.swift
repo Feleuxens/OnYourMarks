@@ -147,22 +147,31 @@ struct TimingAndDecisionTests {
             )
         }
 
+        /// A standing start is false when the movement was certain before
+        /// the gun, not within the 100 ms of a block start.
         @Test
-        func standingStartDoesNotUseBlockReactionThreshold() {
+        func standingStartIsJudgedAgainstTheGunItself() {
             let engine = DecisionEngine()
 
-            let reaction = DurationEstimate.exact(
-                0.050
+            #expect(engine.evaluateReaction(.exact(0.050), profile: .standing) == .legal)
+            #expect(engine.evaluateReaction(.exact(0.050), profile: .block) == .definiteFalseStart)
+
+            // As recorded on the device: certain 26 ms before the gun.
+            let early = DurationEstimate(best: -0.060, earliest: -0.093, latest: -0.026)
+            #expect(engine.evaluateReaction(early, profile: .standing) == .definiteFalseStart)
+
+            // A slow beginning that reaches across the gun.
+            let across = DurationEstimate(best: -0.020, earliest: -0.050, latest: 0.010)
+            #expect(engine.evaluateReaction(across, profile: .standing) == .uncertain)
+        }
+
+        @Test
+        func aStartWithoutAThresholdIsNotJudgedByItsReaction() {
+            let profile = StartProfile(
+                startType: .standing, usesSetCommand: false, automaticReactionThreshold: nil, motion: .standing
             )
 
-            let result = engine.evaluateReaction(
-                reaction,
-                profile: .standing
-            )
-
-            #expect(
-                result == .notApplicable
-            )
+            #expect(DecisionEngine().evaluateReaction(.exact(-0.5), profile: profile) == .notApplicable)
         }
 
         @Test

@@ -317,6 +317,41 @@ struct AthleteStabilityTests {
         #expect(onset.best == onset.latest)
     }
 
+    /// A standing athlete who has leaned out of the tolerance starts from
+    /// there. Leaning out was not the beginning of the start.
+    @Test
+    func aStartAfterLeaningOutBeginsWithItsRise() throws {
+        var (stability, now) = stable(.standing)
+
+        // Outside the tolerance for longer than a start takes.
+        _ = feed(&stability, body(moving: [.torso], dy: 0.2), for: 2 * MotionProfile.standing.unsteadyDelay, from: &now)
+        let lastLeaning = now
+
+        #expect(feed(&stability, body(moving: [.torso], dy: 0.29), for: frame, from: &now).isEmpty)
+        let rising = now
+        #expect(feed(&stability, body(moving: [.torso], dy: 0.4), for: frame, from: &now) == [.started])
+
+        let onset = try #require(stability.onset)
+        #expect(abs(onset.earliest.seconds - lastLeaning) < 0.000_001)
+        #expect(abs(onset.best.seconds - rising) < 0.000_001)
+        #expect(abs(onset.latest.seconds - now) < 0.000_001)
+    }
+
+    /// Whatever the athlete did while hidden, the movement began after the
+    /// last frame that showed them.
+    @Test
+    func aStartAfterBeingHiddenBeganAfterTheLastFrameSeen() throws {
+        var (stability, now) = stable()
+        let lastSeen = now
+
+        now += 1
+        #expect(feed(&stability, body(moving: [.hands], dy: 0.5), for: frame, from: &now) == [.started])
+
+        let onset = try #require(stability.onset)
+        #expect(abs(onset.earliest.seconds - lastSeen) < 0.000_001)
+        #expect(onset.best == onset.latest)
+    }
+
     @Test
     func theRestingPoseIsKnownOnceStable() {
         var stability = AthleteStability(profile: .block)

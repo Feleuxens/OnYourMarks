@@ -104,8 +104,15 @@ final class PoseMotionDetector: MovementDetector {
             $0.monitor.end()
             $0.tracker.retained = []
         }
-        motion.withLock { $0.reset() }
+        let records = motion.withLock { timeline in
+            defer { timeline.reset() }
+            return timeline.records
+        }
         isReady = false
+
+        for record in records {
+            onEvent?(.motionSampled(record))
+        }
     }
 
     /// Forgets the athletes; the next ones in view get new IDs.

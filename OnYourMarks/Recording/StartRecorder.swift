@@ -15,10 +15,14 @@ protocol StartRecorder: AnyObject {
     /// The athletes of one analysed frame. Ignored outside of a recording.
     func record(_ frame: TrackingFrame)
 
-    /// The run is over. The recorder may go on for a moment to show how the
-    /// start went on, and keeps the recording only if the start got as far
-    /// as a gun or a false start.
-    func endRecording(session: StartSession, results: [AthleteStartResult])
+    /// What the detector's sampler saw of one athlete, frame by frame.
+    /// Ignored outside of a recording.
+    func record(_ motion: MotionRecord)
+
+    /// The run is over. After a completed start the recorder goes on for
+    /// `tail` seconds to show how the start went on. It keeps the recording
+    /// only if the start got as far as a gun or a false start.
+    func endRecording(session: StartSession, results: [AthleteStartResult], tail: TimeInterval)
 }
 
 /// Where a recorder gets the camera's frames.

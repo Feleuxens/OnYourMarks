@@ -505,7 +505,7 @@ struct CameraControllerTests {
                 camera.setPrecisionFrameRate(Double(rate.rawValue))
                 let detector = PoseMotionDetector(camera: camera)
                 let store = RecordingStore.scratch()
-                let recorder = StartRecordingController(source: camera, store: store, tail: .zero)
+                let recorder = StartRecordingController(source: camera, store: store)
 
                 // What the engine does with them during a start.
                 var analysed = 0
@@ -553,7 +553,7 @@ struct CameraControllerTests {
                 if records {
                     var session = StartSession(startType: .block, profile: .block, createdAt: MonotonicTimestamp(seconds: began))
                     session.finish(.completed, at: .exact(MonotonicTimestamp(seconds: CACurrentMediaTime())))
-                    recorder.endRecording(session: session, results: [])
+                    recorder.endRecording(session: session, results: [], tail: 0)
 
                     await waitUntil(timeout: .seconds(20)) { recorder.last != nil }
                     let recording = try #require(recorder.last)

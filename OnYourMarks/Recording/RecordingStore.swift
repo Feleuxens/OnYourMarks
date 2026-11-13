@@ -6,7 +6,8 @@
 import Foundation
 
 /// Where recorded starts live on disk: one folder per start with the clean
-/// video, the start's record and the tracking data, each in its own file.
+/// video, the start's record, the tracking data and what the sampler saw of
+/// the athletes, each in its own file.
 ///
 /// The last start sits in the temporary directory until the next one
 /// replaces it; saving moves its folder into the library.
@@ -20,6 +21,7 @@ nonisolated struct RecordingStore: Sendable {
     static let videoFileName = "video.mov"
     static let recordFileName = "start.json"
     static let trackingFileName = "tracking.json"
+    static let motionFileName = "motion.json"
 
     private let temporaryDirectory: URL
     private let libraryDirectory: URL
@@ -42,7 +44,7 @@ nonisolated struct RecordingStore: Sendable {
 
     /// The files of a recording, for handing them to another app.
     func files(of id: UUID, in location: Location) -> [URL] {
-        [Self.videoFileName, Self.recordFileName, Self.trackingFileName]
+        [Self.videoFileName, Self.recordFileName, Self.trackingFileName, Self.motionFileName]
             .map { directory(of: id, in: location).appending(path: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
@@ -58,13 +60,19 @@ nonisolated struct RecordingStore: Sendable {
         return videoURL(of: id, in: .temporary)
     }
 
-    /// Writes the record and the tracking data beside the temporary video.
-    func write(_ recording: StartRecording, tracking: [TrackingFrame]) throws {
+    /// Writes the record and the tracking data beside the temporary video,
+    /// and what the sampler saw if it saw anything: a handheld start or one
+    /// without athletes has nothing.
+    func write(_ recording: StartRecording, tracking: [TrackingFrame], motion: [MotionRecord] = []) throws {
         let directory = directory(of: recording.id, in: .temporary)
         let encoder = JSONEncoder()
 
         try encoder.encode(recording).write(to: directory.appending(path: Self.recordFileName), options: .atomic)
         try encoder.encode(tracking).write(to: directory.appending(path: Self.trackingFileName), options: .atomic)
+
+        if !motion.isEmpty {
+            try encoder.encode(motion).write(to: directory.appending(path: Self.motionFileName), options: .atomic)
+        }
     }
 
     /// Every complete recording at the location, newest first. A folder
@@ -90,6 +98,14 @@ nonisolated struct RecordingStore: Sendable {
     func tracking(of id: UUID, in location: Location) throws -> [TrackingFrame] {
         let data = try Data(contentsOf: directory(of: id, in: location).appending(path: Self.trackingFileName))
         return try JSONDecoder().decode([TrackingFrame].self, from: data)
+    }
+
+    /// Empty for a recording without the file.
+    func motion(of id: UUID, in location: Location) throws -> [MotionRecord] {
+        let file = directory(of: id, in: location).appending(path: Self.motionFileName)
+
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        return try JSONDecoder().decode([MotionRecord].self, from: Data(contentsOf: file))
     }
 
     /// Removes every temporary recording but the given ones.

@@ -520,7 +520,8 @@ final class FakeStartRecorder: StartRecorder {
     
     private(set) var beginCount = 0
     private(set) var tracking: [TrackingFrame] = []
-    private(set) var ended: [(session: StartSession, results: [AthleteStartResult])] = []
+    private(set) var motion: [MotionRecord] = []
+    private(set) var ended: [(session: StartSession, results: [AthleteStartResult], tail: TimeInterval)] = []
     
     func beginRecording() -> Bool {
         guard canRecord else { return false }
@@ -533,8 +534,12 @@ final class FakeStartRecorder: StartRecorder {
         tracking.append(frame)
     }
     
-    func endRecording(session: StartSession, results: [AthleteStartResult]) {
-        ended.append((session, results))
+    func record(_ motion: MotionRecord) {
+        self.motion.append(motion)
+    }
+    
+    func endRecording(session: StartSession, results: [AthleteStartResult], tail: TimeInterval) {
+        ended.append((session, results, tail))
     }
 }
 

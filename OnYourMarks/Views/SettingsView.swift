@@ -43,6 +43,10 @@ struct SettingsView: View {
                     
                     Toggle("Record starts", isOn: $vm.config.recordsVideo)
                         .accessibilityIdentifier("recordStartsToggle")
+                    
+                    DelaySlider(id: 8, title: "Recording after the start", time: $vm.config.recordingAfterStart, range: StartConfig.recordingAfterStartRange, step: 0.5, focusedSlider: $focusedSlider)
+                        .disabled(!vm.config.recordsVideo)
+                        .accessibilityIdentifier("recordingAfterStartSlider")
                 } header: {
                     Text("Camera")
                 } footer: {

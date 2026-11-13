@@ -604,6 +604,16 @@
         }
       }
     },
+    "Recording after the start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufnahme nach dem Start"
+          }
+        }
+      }
+    },
     "Remove calibration" : {
       "localizations" : {
         "de" : {
