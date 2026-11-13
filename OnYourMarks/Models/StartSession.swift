@@ -96,6 +96,10 @@ nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     
     case decision(StartDecision)
     
+    /// A false start was not recalled because recalls were switched off;
+    /// the start went on.
+    case recallSkipped
+    
     case sessionEnded(StartSessionOutcome)
 }
 

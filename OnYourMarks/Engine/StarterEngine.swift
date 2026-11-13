@@ -38,6 +38,9 @@ final class StarterEngine {
     private var recordsVideo = false
     private var isRecording = false
     
+    /// Whether a false start is recalled. If not, it is only recorded.
+    private var recallsFalseStarts = true
+    
     /// How long after the gun a recording goes on, at the precision rate.
     private var recordingAfterStart: TimeInterval = 0
     
@@ -179,6 +182,7 @@ final class StarterEngine {
         followThrough = nil
         endPrecisionWindow()
         
+        recallsFalseStarts = config.recallsFalseStarts
         recordsVideo = config.recordsVideo
         recordingAfterStart = config.recordingAfterStart
         isRecording = false
@@ -514,18 +518,25 @@ final class StarterEngine {
         )
         
         switch result.decision {
-        case .definiteFalseStart:
+        case .definiteFalseStart where recallsFalseStarts:
             triggerFalseStart()
             
-        case .uncertain,
+        case .definiteFalseStart,
+                .uncertain,
                 .legal,
                 .notApplicable:
+            if result.decision == .definiteFalseStart {
+                // Measured and shown, but the start goes on like any other.
+                record(.recallSkipped, source: .system, athleteID: result.athleteID)
+            }
+            
             guard everyAthleteHasMoved(after: result) else { return }
             
             stopMovementMonitoring()
             
-            // A recording keeps the precision rate for the first steps.
-            if recordingContinuesUntil == nil {
+            // A recording keeps the precision rate, for the gun that may
+            // still come and for the first steps.
+            if !isRecording {
                 endPrecisionWindow()
             }
             

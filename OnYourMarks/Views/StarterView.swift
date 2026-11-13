@@ -49,12 +49,22 @@ struct StarterView: View {
                         }
                     }
                     .overlay(alignment: .bottom) {
-                        CameraToggleButton(isOn: vm.cameraEnabled) {
-                            if vm.cameraEnabled { vm.disableCamera() }
-                            else { vm.enableCamera() }
+                        HStack(spacing: 8) {
+                            CameraToggleButton(isOn: vm.cameraEnabled) {
+                                if vm.cameraEnabled { vm.disableCamera() }
+                                else { vm.enableCamera() }
+                            }
+                            .disabled(vm.isRunning)
+                            .opacity(vm.isRunning ? 0.5 : 1)
+                            
+                            // Without detection there is nothing to recall.
+                            RecallToggleButton(isOn: vm.config.recallsFalseStarts) {
+                                vm.config.recallsFalseStarts.toggle()
+                            }
+                            .disabled(vm.isRunning || !vm.cameraEnabled)
+                            .opacity(vm.isRunning || !vm.cameraEnabled ? 0.5 : 1)
+                            .accessibilityIdentifier("recallToggle")
                         }
-                        .disabled(vm.isRunning)
-                        .opacity(vm.isRunning ? 0.5 : 1)
                         .padding(.bottom, 8)
                     }
                     

@@ -584,6 +584,26 @@
         }
       }
     },
+    "Recall off" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rückschuss aus"
+          }
+        }
+      }
+    },
+    "Recall on" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rückschuss an"
+          }
+        }
+      }
+    },
     "Record starts" : {
       "localizations" : {
         "de" : {

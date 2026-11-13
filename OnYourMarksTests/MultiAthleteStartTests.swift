@@ -109,6 +109,62 @@ struct MultiAthleteStartTests {
         #expect(abs((engine.athleteResults.first?.reaction?.best ?? 0) - 0.52) < 0.000_001)
     }
     
+    /// With the recall switched off a false start is measured and shown,
+    /// and the start goes on for everyone.
+    @Test
+    func withoutRecallAFalseStartIsMarkedAndTheStartGoesOn() async throws {
+        let ids = [AthleteID(), AthleteID()]
+        let (engine, player, detector, base, clock) = makeTimedEngine(athletes: ids)
+        var config = base
+        config.recallsFalseStarts = false
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        
+        // The first athlete leaves 0.3 s before the gun.
+        await clock.advance(by: 0.2)
+        detector.emitMovement(at: clock.now().seconds, athlete: ids[0], quality: good)
+        
+        #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart])
+        #expect(engine.state == .waitForStart)
+        #expect(detector.stopCount == 0)
+        
+        await clock.advance(by: 0.3)
+        #expect(engine.state == .start)
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        // The other one is measured against the gun as usual.
+        await clock.advance(by: 0.2)
+        detector.emitMovement(at: gun + 0.18, athlete: ids[1], quality: good)
+        await clock.advance(by: 0.3)
+        
+        #expect(!engine.isRunning)
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart, .legal])
+        #expect(player.recallCount == 0)
+        #expect(player.played.contains(.go))
+        #expect(events(engine).filter { $0.kind == .recallSkipped }.map { $0.athleteID } == [ids[0]])
+    }
+    
+    @Test
+    func withoutRecallAReactionThatIsTooFastIsOnlyMarked() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, base) = makeEngine(athletes: ids, holdTime: 0)
+        var config = base
+        config.recallsFalseStarts = false
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        
+        detector.emitMovement(at: gun + 0.05, athlete: ids[0], quality: good)
+        await waitUntil { !engine.isRunning }
+        
+        #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart])
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(player.recallCount == 0)
+    }
+    
     @Test
     func theRunEndsWhenNobodyMovesWithinTheReactionWindow() async throws {
         let (engine, _, _, config, clock) = makeTimedEngine(athletes: [AthleteID()])

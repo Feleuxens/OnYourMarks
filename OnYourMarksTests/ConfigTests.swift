@@ -104,6 +104,19 @@ struct ConfigTests {
     }
 
     @Test
+    func falseStartsAreRecalledUnlessSwitchedOff() throws {
+        var config = StartConfig.standard
+        #expect(config.recallsFalseStarts)
+
+        config.recallsFalseStarts = false
+        let restored = try JSONDecoder().decode(StartConfig.self, from: JSONEncoder().encode(config))
+        #expect(!restored.recallsFalseStarts)
+
+        let old = try JSONDecoder().decode(StartConfig.self, from: Data("{}".utf8))
+        #expect(old.recallsFalseStarts)
+    }
+
+    @Test
     func storeRoundTripsConfig() {
         let (store, _) = makeStore()
 

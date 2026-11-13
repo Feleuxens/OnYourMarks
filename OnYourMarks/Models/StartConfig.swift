@@ -49,6 +49,10 @@ nonisolated struct StartConfig: Codable, Sendable {
     var audioOutput: AudioOutput = .automatic
     var cameraMount: CameraMount = .tripod
     var frameRate: CameraFrameRate = .fps120
+    /// Whether a false start is answered with the recall shots and ends
+    /// the start. Without them it is measured and shown all the same, and
+    /// the athletes run.
+    var recallsFalseStarts = true
     /// Whether a start with the camera on is recorded for the review.
     var recordsVideo = true
     /// How long after the gun a recorded start is still filmed, at the
@@ -63,7 +67,7 @@ nonisolated struct StartConfig: Codable, Sendable {
     init() {}
     
     private enum CodingKeys: String, CodingKey {
-        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate, recordsVideo, recordingAfterStart
+        case blockTimeToReady, standingTimeToReady, blockTimeToSet, blockTimeToStartMin, blockTimeToStartMax, standingTimeToStartMin, standingTimeToStartMax, startType, soundTheme, audioOutput, cameraMount, frameRate, recordsVideo, recordingAfterStart, recallsFalseStarts
 }
     
     init(from decoder: Decoder) throws {
@@ -86,6 +90,7 @@ nonisolated struct StartConfig: Codable, Sendable {
         cameraMount = try container.decodeIfPresent(CameraMount.self, forKey: .cameraMount) ?? defaults.cameraMount
         frameRate = (try? container.decodeIfPresent(CameraFrameRate.self, forKey: .frameRate)) ?? defaults.frameRate
         recordsVideo = try container.decodeIfPresent(Bool.self, forKey: .recordsVideo) ?? defaults.recordsVideo
+        recallsFalseStarts = try container.decodeIfPresent(Bool.self, forKey: .recallsFalseStarts) ?? defaults.recallsFalseStarts
         recordingAfterStart = try container.decodeIfPresent(Double.self, forKey: .recordingAfterStart) ?? defaults.recordingAfterStart
 
         normalize()
