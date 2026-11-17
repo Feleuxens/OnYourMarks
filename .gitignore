@@ -61,3 +61,8 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
+CLAUDE.md
+AGENTS.md
+FieldData/
+.DS_Store
+
