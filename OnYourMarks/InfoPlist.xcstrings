@@ -31,6 +31,24 @@
         }
       }
     },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Local network permission prompt",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OnYourMarks verbindet sich mit deinen anderen Handys in der Nähe, um Starts gemeinsam zu messen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "OnYourMarks connects to your other phones nearby to time starts together."
+          }
+        }
+      }
+    },
     "NSMicrophoneUsageDescription" : {
       "comment" : "Microphone permission prompt",
       "extractionState" : "extracted_with_value",

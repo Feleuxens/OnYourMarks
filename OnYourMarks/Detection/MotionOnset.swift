@@ -264,6 +264,28 @@ nonisolated enum MotionOnsetAnalyzer {
     /// square, so this is a tenth of the difference in brightness.
     static let movementShare = 0.01
 
+    /// The constants above as one value, so that recorded starts can be
+    /// analysed again with others: by the second pass over a recording,
+    /// and by whoever tunes them against recorded starts. `live` is what
+    /// the detector uses during a start.
+    struct Parameters: Equatable, Codable, Sendable {
+        var lookback = MotionOnsetAnalyzer.lookback
+        var referenceLag = MotionOnsetAnalyzer.referenceLag
+        var referenceSpan = MotionOnsetAnalyzer.referenceSpan
+        var restDuration = MotionOnsetAnalyzer.restDuration
+        var minimumRest = MotionOnsetAnalyzer.minimumRest
+        var minimumRestFrames = MotionOnsetAnalyzer.minimumRestFrames
+        var largestGap = MotionOnsetAnalyzer.largestGap
+        var certainFactor = MotionOnsetAnalyzer.certainFactor
+        var beginningFactor = MotionOnsetAnalyzer.beginningFactor
+        var cellNoiseFloor = MotionOnsetAnalyzer.cellNoiseFloor
+        var minimumRise = MotionOnsetAnalyzer.minimumRise
+        var recentPast = MotionOnsetAnalyzer.recentPast
+        var movementShare = MotionOnsetAnalyzer.movementShare
+
+        static let live = Parameters()
+    }
+
     struct Onset: Equatable, Sendable {
         /// After the last frame that still looked like rest, up to the
         /// first in which the movement was certain. Two frames that follow
@@ -285,22 +307,105 @@ nonisolated enum MotionOnsetAnalyzer {
         let restCount: Int
     }
 
+    /// What the change was at rest, and how far above it a movement has to
+    /// rise. Learned from the resting part of a `Changes`.
+    struct Levels: Equatable, Codable, Sendable {
+        /// The median change at rest.
+        let resting: Double
+
+        /// How much the change varies at rest, as a standard deviation
+        /// (from the median of the absolute deviations, so that a lively
+        /// moment at rest doesn't inflate it).
+        let spread: Double
+
+        /// How far above the resting level the change has to be for the
+        /// movement to be certain: `certainFactor` spreads, and never less
+        /// than rest itself ever rose.
+        let certainRise: Double
+
+        /// How far above what it was just before the change has to be for a
+        /// frame to belong to the rise of a movement.
+        let beginningRise: Double
+
+        /// Above this the movement is certain.
+        var certain: Double {
+            resting + certainRise
+        }
+
+        /// - Parameter values: the change at rest; at least one.
+        init(resting values: some Collection<Double>, parameters: Parameters = .live) {
+            let sorted = values.sorted()
+            let level = sorted[sorted.count / 2]
+            let deviations = sorted.map { abs($0 - level) }.sorted()
+            let spread = MotionOnsetAnalyzer.madToStandardDeviation * deviations[deviations.count / 2]
+
+            resting = level
+            self.spread = spread
+            // Rest never rose further than to its own maximum either.
+            certainRise = max(parameters.certainFactor * spread, parameters.minimumRise, sorted[sorted.count - 1] - level)
+            beginningRise = max(parameters.beginningFactor * spread, parameters.minimumRise / 2)
+        }
+    }
+
+    /// The quantity the analysis thresholds, frame by frame, with the
+    /// levels it is judged by: for drawing how the picture of an athlete
+    /// changed along a start.
+    ///
+    /// A value is the mean over the grid's cells of each cell's squared
+    /// difference from the average picture `referenceLag` to `referenceLag
+    /// + referenceSpan` before it (overall brightness taken out), divided
+    /// by that cell's mean squared difference at rest plus the noise floor.
+    /// About 1 at rest and far above it in a start. It is a square: twice
+    /// the difference in brightness is four times the value.
+    struct ChangeSeries: Equatable, Codable, Sendable {
+        /// Capture time of every judged frame, rising.
+        let times: [MonotonicTimestamp]
+        let values: [Double]
+
+        /// How many of them, from the first, were taken as rest.
+        let restCount: Int
+
+        let levels: Levels
+    }
+
+    /// The change of every frame of the steady stretch up to `end`; rest is
+    /// what lies more than `parameters.lookback` before it. Nil where
+    /// `changes(in:confirmedAt:parameters:)` is.
+    static func series(
+        in samples: [MotionSample],
+        until end: MonotonicTimestamp,
+        parameters: Parameters = .live
+    ) -> ChangeSeries? {
+        guard let changes = changes(in: samples, confirmedAt: end, parameters: parameters) else { return nil }
+
+        return ChangeSeries(
+            times: changes.frames.map { $0.time },
+            values: changes.values,
+            restCount: changes.restCount,
+            levels: Levels(resting: changes.values.prefix(changes.restCount), parameters: parameters)
+        )
+    }
+
     /// Nil if the samples don't allow a statement: too little rest at the
     /// rate of the confirmation, no change at the confirmation, or change
     /// all the way back.
-    static func onset(in samples: [MotionSample], confirmedAt confirmation: MonotonicTimestamp) -> Onset? {
-        guard let changes = changes(in: samples, confirmedAt: confirmation) else { return nil }
+    ///
+    /// - Parameter confirmation: the last frame looked at. Live, the frame
+    ///   in which pose detection confirmed the movement. A later one with a
+    ///   `lookback` longer by as much lets the analysis see past it.
+    static func onset(
+        in samples: [MotionSample],
+        confirmedAt confirmation: MonotonicTimestamp,
+        parameters: Parameters = .live
+    ) -> Onset? {
+        guard let changes = changes(in: samples, confirmedAt: confirmation, parameters: parameters) else { return nil }
 
         let values = changes.values
-        let resting = values.prefix(changes.restCount).sorted()
-        let level = resting[resting.count / 2]
-        let deviations = resting.map { abs($0 - level) }.sorted()
-        let spread = madToStandardDeviation * deviations[deviations.count / 2]
-
-        // Rest never rose further than to its own maximum either.
-        let certainRise = max(certainFactor * spread, minimumRise, resting[resting.count - 1] - level)
-        let beginningRise = max(beginningFactor * spread, minimumRise / 2)
-        let certain = level + certainRise
+        let levels = Levels(resting: values.prefix(changes.restCount), parameters: parameters)
+        let level = levels.resting
+        let certainRise = levels.certainRise
+        let beginningRise = levels.beginningRise
+        let certain = levels.certain
 
         // Pose detection saw a movement here; the picture has to show one too.
         guard let last = values.indices.last, values[last] > certain else { return nil }
@@ -308,7 +413,7 @@ nonisolated enum MotionOnsetAnalyzer {
         // Rest can be livelier than the stretch of it that was seen. Next to
         // what a start does to the picture that is still little.
         let peak = values[changes.restCount...].max() ?? values[last]
-        let sureLevel = max(certain, movementShare * peak)
+        let sureLevel = max(certain, parameters.movementShare * peak)
 
         var sure = last
         while sure > 0, values[sure - 1] > sureLevel {
@@ -319,7 +424,7 @@ nonisolated enum MotionOnsetAnalyzer {
         // without a gap. It changes slowly, the start doesn't: the movement
         // is where the change has risen above what it was just before.
         func recent(_ index: Int) -> Double {
-            recentLevel(before: index, in: changes, atLeast: level)
+            recentLevel(before: index, in: changes, atLeast: level, within: parameters.recentPast)
         }
 
         while sure < last, values[sure] <= recent(sure) + certainRise {
@@ -352,7 +457,12 @@ nonisolated enum MotionOnsetAnalyzer {
 
     /// The usual change shortly before a frame, and never less than the
     /// resting level. Without frames in that stretch, the resting level.
-    private static func recentLevel(before index: Int, in changes: Changes, atLeast level: Double) -> Double {
+    private static func recentLevel(
+        before index: Int,
+        in changes: Changes,
+        atLeast level: Double,
+        within recentPast: ClosedRange<TimeInterval>
+    ) -> Double {
         let time = changes.frames[index].time.seconds
         var values: [Double] = []
 
@@ -375,19 +485,25 @@ nonisolated enum MotionOnsetAnalyzer {
     private static let madToStandardDeviation = 1.4826
 
     /// Nil without enough rest before the lookback at the rate of the confirmation.
-    static func changes(in samples: [MotionSample], confirmedAt confirmation: MonotonicTimestamp) -> Changes? {
-        let frames = steadyStretch(of: samples, until: confirmation)
+    static func changes(
+        in samples: [MotionSample],
+        confirmedAt confirmation: MonotonicTimestamp,
+        parameters: Parameters = .live
+    ) -> Changes? {
+        let referenceLag = parameters.referenceLag
+        let referenceSpan = parameters.referenceSpan
+        let frames = steadyStretch(of: samples, until: confirmation, parameters: parameters)
 
         guard let start = frames.first?.time.seconds,
               let firstJudged = frames.firstIndex(where: { $0.time.seconds - start >= referenceLag + referenceSpan }) else {
             return nil
         }
 
-        let restEnd = confirmation.seconds - lookback
+        let restEnd = confirmation.seconds - parameters.lookback
         let restCount = frames[firstJudged...].prefix { $0.time.seconds < restEnd }.count
 
-        guard restCount >= minimumRestFrames,
-              restEnd - frames[firstJudged].time.seconds >= minimumRest,
+        guard restCount >= parameters.minimumRestFrames,
+              restEnd - frames[firstJudged].time.seconds >= parameters.minimumRest,
               firstJudged + restCount < frames.count else {
             return nil
         }
@@ -426,7 +542,8 @@ nonisolated enum MotionOnsetAnalyzer {
         for square in squares.prefix(restCount) {
             vDSP.add(variance, square, result: &variance)
         }
-        variance = vDSP.add(cellNoiseFloor * cellNoiseFloor, vDSP.divide(variance, Float(restCount)))
+        let noiseFloor = parameters.cellNoiseFloor
+        variance = vDSP.add(noiseFloor * noiseFloor, vDSP.divide(variance, Float(restCount)))
 
         return Changes(
             frames: Array(frames[firstJudged...]),
@@ -437,8 +554,13 @@ nonisolated enum MotionOnsetAnalyzer {
 
     /// The frames up to the confirmation that arrived at its rate: back to
     /// the first gap that is too long, and no further than is looked at.
-    static func steadyStretch(of samples: [MotionSample], until confirmation: MonotonicTimestamp) -> [MotionSample] {
-        let reach = restDuration + lookback + referenceLag + referenceSpan
+    static func steadyStretch(
+        of samples: [MotionSample],
+        until confirmation: MonotonicTimestamp,
+        parameters: Parameters = .live
+    ) -> [MotionSample] {
+        let lookback = parameters.lookback
+        let reach = parameters.restDuration + lookback + parameters.referenceLag + parameters.referenceSpan
 
         let window = samples.filter {
             $0.time <= confirmation
@@ -453,7 +575,7 @@ nonisolated enum MotionOnsetAnalyzer {
         guard usual > 0 else { return [] }
 
         var first = window.count - 1
-        while first > 0, window[first].time.seconds - window[first - 1].time.seconds <= largestGap * usual {
+        while first > 0, window[first].time.seconds - window[first - 1].time.seconds <= parameters.largestGap * usual {
             first -= 1
         }
         return Array(window[first...])

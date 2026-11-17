@@ -34,6 +34,15 @@ struct ReplayScrubber: View {
                     marker(for: gun, in: width, color: .yellow, height: Self.markerHeight + 10)
                 }
 
+                // Passed over for want of a second pose: shown, never judged.
+                ForEach(Array(timeline.unconfirmed.enumerated()), id: \.offset) { _, movement in
+                    marker(for: movement.onset, in: width, color: .gray, height: Self.markerHeight / 2)
+                }
+
+                ForEach(Array(timeline.probeResults.enumerated()), id: \.offset) { _, result in
+                    marker(for: result.observation.change, in: width, color: .cyan, height: Self.markerHeight)
+                }
+
                 ForEach(Array(timeline.results.enumerated()), id: \.offset) { _, result in
                     marker(for: result.movement, in: width, color: result.decision.color, height: Self.markerHeight)
                         .opacity(highlighted == nil || highlighted == result.athleteID ? 1 : 0.35)

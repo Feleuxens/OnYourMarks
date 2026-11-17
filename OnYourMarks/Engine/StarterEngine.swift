@@ -61,7 +61,12 @@ final class StarterEngine {
     /// Set when the gun could not be found on the render timeline: nothing
     /// says it was heard when it was scheduled.
     private var gunWasNotMeasured = false
-    
+
+    /// Listens for the committed gun with the microphone, if the player
+    /// can. An observation only: what it finds goes into the session, not
+    /// into a decision.
+    private var gunHearing: Task<Void, Never>?
+
     /// Long enough for the first render cycles to have passed.
     private static let gunMeasurementDelay: TimeInterval = 0.05
     
@@ -120,10 +125,29 @@ final class StarterEngine {
     
     private var monitoringActive: Bool = false
     private var precisionWindowActive = false
+
+    /// The regions a measurement watches instead of athletes; empty for a start.
+    private var probeRegions: [ProbeRegion] = []
+    /// Every step the probed regions made in this run.
+    private var probeSteps: [ProbeObservation] = []
+
+    /// What the last measurement found, one per region that changed; set
+    /// when the run ends.
+    private(set) var probeResults: [ProbeResult] = []
+
+    private var isProbing: Bool {
+        !probeRegions.isEmpty
+    }
     
-    /// How long before the gun the movement detector goes to full speed.
-    /// The camera needs about 0.2 s to reach its high frame rate.
-    static let precisionLead: TimeInterval = 1
+    /// Capture time of the last frame before the camera failed after the
+    /// gun. Movements seen in later frames are not judged: the frames in
+    /// between are missing, and with them where the athlete was.
+    private var cameraFailedAfter: MonotonicTimestamp?
+    
+    /// How long a camera that was just switched on gets to deliver its
+    /// first frame before the start is given up. Reasoned, not measured:
+    /// starting a session takes a fraction of that.
+    static let cameraStartupTimeout: TimeInterval = 2
     
     var onRunEnded: (() -> Void)?
     var onError: ((String) -> Void)?
@@ -174,6 +198,8 @@ final class StarterEngine {
         gunTime = nil
         scheduledGun = nil
         gunWasNotMeasured = false
+        gunHearing?.cancel()
+        gunHearing = nil
         roster = nil
         athleteResults = []
         firstFalseStart = nil
@@ -181,12 +207,17 @@ final class StarterEngine {
         wakeRequested = false
         wasWokenEarly = false
         monitoringActive = false
+        cameraFailedAfter = nil
         
         // The start before this one may still be followed by its recording.
         followThrough?.cancel()
         followThrough = nil
         endPrecisionWindow()
         
+        probeRegions = config.probeRegions
+        probeSteps = []
+        probeResults = []
+
         recallsFalseStarts = config.recallsFalseStarts
         recordsVideo = config.recordsVideo
         recordingAfterStart = config.recordingAfterStart
@@ -242,9 +273,24 @@ final class StarterEngine {
         // The athletes of a completed start are filmed on, as finely as before.
         let recordingEnd = outcome == .completed ? recordingContinuesUntil : nil
         
+        // What the run had of the precision rate, before the window ends.
+        if precisionWindowActive, let delivery = movementDetector.precisionDelivery() {
+            record(.camera(.delivered(delivery)), source: movementDetector.source)
+            
+            if !delivery.isReached {
+                logger.notice(
+                    """
+                    The camera delivered \(delivery.deliveredFrameRate ?? 0, format: .fixed(precision: 1)) of \
+                    \(delivery.requestedFrameRate, format: .fixed(precision: 0)) fps
+                    """
+                )
+            }
+        }
+        
         player.stop()
         stopMovementMonitoring()
-        
+        recordProbeResults()
+
         if let recordingEnd {
             followThrough = Task { [weak self] in
                 await self?.clock.sleep(until: recordingEnd)
@@ -258,6 +304,9 @@ final class StarterEngine {
         
         gunTime = nil
         scheduledGun = nil
+        // A completed run waited for it; any other run ends without it.
+        gunHearing?.cancel()
+        gunHearing = nil
         setState(.idle)
         isRunning = false
         
@@ -322,7 +371,123 @@ final class StarterEngine {
             
         case .motionSampled(let motion):
             recorder?.record(motion)
+        
+        case .camera(let report):
+            handleCamera(report)
+
+        case .movementUnconfirmed(let movement):
+            handleUnconfirmed(movement)
+
+        case .probeChanged(let observation):
+            handleProbe(observation)
         }
+    }
+    
+    /// Records what the camera did and acts on a failure: before the gun
+    /// can no longer be taken back, the start is given up; after that it
+    /// goes on, but nothing seen once the frames came back is judged.
+    private func handleCamera(_ report: CameraReport) {
+        guard isRunning else { return }
+        
+        record(.camera(report), source: movementDetector.source)
+        
+        if case .failed(let fault, let lastFrame) = report {
+            if gunTime == nil, state != .falseStart {
+                failForCamera(fault)
+                return
+            }
+            
+            if gunTime != nil, cameraFailedAfter == nil {
+                cameraFailedAfter = lastFrame ?? clock.now()
+                logger.error("The camera failed after the gun: \(String(describing: fault), privacy: .public)")
+            }
+        }
+        
+        // The hold may be waiting for a steady camera.
+        wakeSequence()
+    }
+    
+    private func failForCamera(_ fault: CameraFault) {
+        logger.error("The camera failed before the gun: \(String(describing: fault), privacy: .public)")
+        
+        player.stop()
+        
+        if scheduledGun != nil {
+            scheduledGun = nil
+            record(.gunCancelled, source: .system)
+        }
+        
+        let message = String(localized: "The camera stopped during the start, so the start was cancelled.")
+        onError?(message)
+        abort(reason: message)
+    }
+    
+    /// Whether the camera lets the gun be armed: off, or steady in the
+    /// precision window.
+    private var cameraIsSteady: Bool {
+        switch movementDetector.cameraCondition {
+        case .off: true
+        case .delivering(let isSteady): isSteady
+        case .starting, .failed: false
+        }
+    }
+
+    /// A step in a probed region. Every one is kept; which one is measured
+    /// against the gun is decided when the run ends, with the gun's final time.
+    private func handleProbe(_ observation: ProbeObservation) {
+        guard monitoringActive, probeRegions.contains(where: { $0.id == observation.regionID }) else { return }
+
+        probeSteps.append(observation)
+        record(.probeChanged(observation), at: observation.change, source: movementDetector.source)
+
+        // Once every region has changed since the gun there is nothing left to wait for.
+        guard let gunTime else { return }
+
+        let changedSinceGun = Set(probeSteps.filter { $0.change.latest >= gunTime.earliest }.map { $0.regionID })
+
+        if probeRegions.allSatisfy({ changedSinceGun.contains($0.id) }) {
+            stopMovementMonitoring()
+            wakeSequence()
+        }
+    }
+
+    /// Measures every probed region against the gun: the step nearest to it.
+    private func recordProbeResults() {
+        guard let gunTime, isProbing else { return }
+
+        probeResults = ProbeResult.nearest(of: probeSteps, to: gunTime)
+
+        for result in probeResults {
+            record(.probeMeasured(result), at: result.observation.change, source: movementDetector.source)
+
+            logger.info(
+                """
+                Probe changed \(result.offset.best * 1000, format: .fixed(precision: 1)) ms after the gun \
+                (\(result.offset.earliest * 1000, format: .fixed(precision: 1)) to \
+                \(result.offset.latest * 1000, format: .fixed(precision: 1)) ms), \
+                readout position \(result.observation.readoutPosition, format: .fixed(precision: 2))
+                """
+            )
+        }
+    }
+
+    /// A movement nothing backed is not judged, only kept for the review.
+    private func handleUnconfirmed(_ movement: UnconfirmedMovement) {
+        guard roster?.contains(movement.athleteID) == true else { return }
+
+        record(
+            .movementUnconfirmed(movement),
+            at: movement.onset,
+            source: movementDetector.source,
+            athleteID: movement.athleteID
+        )
+
+        logger.info(
+            """
+            Unconfirmed movement\(Self.description(position: self.roster?.position(of: movement.athleteID)), privacy: .public) \
+            given up: \(String(describing: movement.reason), privacy: .public)
+            """
+        )
     }
     
     private func handleMovement(
@@ -347,6 +512,13 @@ final class StarterEngine {
         
         guard let profile = currentSession?.profile else { return }
         
+        // Seen once the camera came back: no result rather than one that
+        // spans the frames that are missing.
+        if let cameraFailedAfter, observation.time > cameraFailedAfter {
+            logger.notice("Movement after the camera failed: not judged")
+            return
+        }
+        
         // Only athletes on the roster are judged, and each only once. A
         // report can still arrive from a frame analysed before monitoring ended.
         if let athleteID {
@@ -369,7 +541,12 @@ final class StarterEngine {
             source: movementDetector.source,
             athleteID: athleteID
         )
-        
+
+        // A detector that confirms on the frame itself has nothing to add.
+        if observation.confirmedAt != observation.time {
+            record(.movementConfirmed, at: .exact(observation.confirmedAt), source: movementDetector.source, athleteID: athleteID)
+        }
+
         guard let gunTime else {
             let decision = decisionEngine.evaluateMovementBeforeGun(trackingQuality: observation.quality)
             
@@ -433,7 +610,8 @@ final class StarterEngine {
     private func handleRefinement(_ refinement: OnsetRefinement) {
         guard isRunning,
               let index = athleteResults.firstIndex(where: { $0.athleteID == refinement.athleteID }),
-              !athleteResults[index].isRefined else {
+              !athleteResults[index].isRefined,
+              cameraFailedAfter.map({ refinement.onset.latest <= $0 }) ?? true else {
             return
         }
         
@@ -508,15 +686,13 @@ final class StarterEngine {
         quality: TrackingQuality?,
         profile: StartProfile
     ) -> StartDecision {
-        let decision = decisionEngine.qualify(
-            decisionEngine.evaluateReaction(reaction, profile: profile),
-            by: quality
-        )
-        
-        return decisionEngine.qualify(
-            decision,
+        decisionEngine.judge(
+            reaction,
+            movement: movement,
+            quality: quality,
+            profile: profile,
             gunTimeIsTrusted: gunTimeIsTrusted,
-            movedBeforeRender: scheduledGun.map { movement.latest < $0.renderStart } ?? false
+            renderStart: scheduledGun?.renderStart
         )
     }
     
@@ -537,6 +713,47 @@ final class StarterEngine {
         
         gunTime = gun.audibleOnset
         record(.gunCommitted, at: gun.audibleOnset, source: .audioLocal)
+
+        listen(for: gun)
+    }
+
+    /// Has the microphone check what the model says about the gun. Its
+    /// result is recorded and shown in the review; the live decision stays
+    /// with the model, which the reactions are measured against.
+    private func listen(for gun: ScheduledSignal) {
+        let session = currentSession?.id
+
+        gunHearing = Task { [weak self, player] in
+            let hearing = await player.hear(gun)
+
+            guard let self, !Task.isCancelled, self.currentSession?.id == session else { return }
+            self.recordHearing(hearing)
+        }
+    }
+
+    private func recordHearing(_ hearing: SignalHearing) {
+        switch hearing {
+        case .notListening:
+            break
+
+        case .heard(let heard):
+            record(.gunHeard(heard), at: heard.heard, source: .audioLocal)
+
+            if let delay = heard.heardAfterModel {
+                logger.info(
+                    """
+                    Gun heard \(delay.best * 1000, format: .fixed(precision: 2)) ms after the model \
+                    (\(delay.earliest * 1000, format: .fixed(precision: 2)) to \
+                    \(delay.latest * 1000, format: .fixed(precision: 2)) ms): \
+                    \(String(describing: heard.check), privacy: .public)
+                    """
+                )
+            }
+
+        case .notHeard(let reason):
+            record(.gunNotHeard(reason), source: .audioLocal)
+            logger.notice("The microphone did not hear the gun: \(String(describing: reason), privacy: .public)")
+        }
     }
     
     /// Stores one athlete's result and acts on it: a false start recalls the
@@ -640,14 +857,12 @@ final class StarterEngine {
     private func runSequence(config: StartConfig) async -> SequenceOutcome {
         let phases = buildSequence(config: config)
         
-        for (index, phase) in phases.enumerated() {
+        for phase in phases {
             guard !Task.isCancelled else {
                 return .cancelled
             }
             
             setState(phase.state)
-            
-            let timeToGun = plannedTimeToGun(after: index, in: phases)
             
             switch phase.state {
             case .preparing:
@@ -661,11 +876,20 @@ final class StarterEngine {
                     return .failed(String(localized: "The start could not be prepared: \(error.localizedDescription)"))
                 }
                 
-                guard !Task.isCancelled, await wait(until: ready, gunIn: timeToGun) else {
+                guard !Task.isCancelled, await sleep(until: ready) else {
                     return .cancelled
                 }
                 
+                // After the wait: a camera switched on just before gets it.
+                if let outcome = await prepareCamera() {
+                    return outcome
+                }
+            
             case .waitForStart:
+                // From the beginning of the hold: the rate has time to
+                // arrive, or to be repaired, before the gun is armed, and
+                // the onset analysis gets the whole hold as rest.
+                beginPrecisionWindow()
                 startMovementMonitoring(profile: config.startType.profile.motion)
                 
                 if let outcome = await runHold(duration: phase.duration ?? 0) {
@@ -685,6 +909,9 @@ final class StarterEngine {
                 recordMeasuredGun()
                 guard await sleep(for: duration - measureAfter) else { return .cancelled }
                 guard await waitForReactions() else { return .cancelled }
+
+                // Usually over by now; the player bounds how long it takes.
+                await gunHearing?.value
                 
             default:
                 if let signal = phase.signal {
@@ -695,7 +922,7 @@ final class StarterEngine {
                 }
                 
                 let end = MonotonicTimestamp(seconds: clock.now().seconds + plannedDuration(of: phase))
-                guard await wait(until: end, gunIn: timeToGun) else { return .cancelled }
+                guard await sleep(until: end) else { return .cancelled }
             }
         }
         return .completed
@@ -705,7 +932,7 @@ final class StarterEngine {
     /// roster has moved or the reaction window is over. Without a roster
     /// there is no one to wait for. False if the run was cancelled.
     private func waitForReactions() async -> Bool {
-        guard let gunTime, roster?.entries.isEmpty == false else { return true }
+        guard let gunTime, isProbing || roster?.entries.isEmpty == false else { return true }
         
         let end = MonotonicTimestamp(seconds: gunTime.best.seconds + reactionWindow)
         
@@ -716,17 +943,24 @@ final class StarterEngine {
         return true
     }
     
-    /// Waits until the athletes hold still, then puts the gun on the audio
-    /// clock and waits for it. An unsteady athlete takes the gun back and
-    /// the hold begins again. Nil once the gun is playing.
+    /// Waits until the athletes hold still and the camera is steady, then
+    /// puts the gun on the audio clock and waits for it. An unsteady athlete
+    /// takes the gun back and the hold begins again. Nil once the gun is playing.
     private func runHold(duration: TimeInterval) async -> SequenceOutcome? {
         var restarts = 0
         
         while true {
             let readyBy = MonotonicTimestamp(seconds: clock.now().seconds + readinessTimeout)
             
-            while !movementDetector.isReady {
+            // A measurement has no athletes to wait for, but it needs the
+            // camera as steady as a start does.
+            while (!isProbing && !movementDetector.isReady) || !cameraIsSteady {
                 guard clock.now() < readyBy else {
+                    guard cameraIsSteady else {
+                        logger.notice("The camera did not get steady in time")
+                        return .failed(String(localized: "The camera did not get ready in time, so the start was cancelled."))
+                    }
+                    
                     logger.notice("The athletes did not hold still in time")
                     return .failed(String(localized: "The athletes did not hold still, so the start was cancelled."))
                 }
@@ -755,7 +989,7 @@ final class StarterEngine {
             player.logTimingDiagnostics(label: "Gun scheduled")
             
             while clock.now() < gun.renderStart {
-                guard await wait(until: gun.renderStart, gunIn: 0, wakeable: true) else { return .cancelled }
+                guard await sleep(until: gun.renderStart, wakeable: true) else { return .cancelled }
                 
                 guard holdWasDisturbed else { continue }
                 
@@ -845,35 +1079,37 @@ final class StarterEngine {
         phase.duration ?? phase.signal.map(player.duration(of:)) ?? 0
     }
     
-    /// How long the phases between the given one and the gun are planned to take.
-    private func plannedTimeToGun(after index: Int, in phases: [Phase]) -> TimeInterval {
-        phases[(index + 1)...]
-            .prefix { $0.state != .start }
-            .reduce(0) { $0 + plannedDuration(of: $1) }
-    }
+    /// With detection on, a start only begins once frames arrive: a camera
+    /// that was just switched on gets `cameraStartupTimeout` for its first
+    /// one. Nil when the sequence may go on; a detector without a camera
+    /// lets it go on as before.
+    private func prepareCamera() async -> SequenceOutcome? {
+        let deadline = MonotonicTimestamp(seconds: clock.now().seconds + Self.cameraStartupTimeout)
     
-    /// Sleeps until the deadline and, if the precision window begins before
-    /// it, opens the window on the way. False if cancelled.
-    ///
-    /// The window is placed by the time left to the gun, not by a phase, so
-    /// it works the same for every start type and however short the hold is.
-    ///
-    /// - Parameter gunIn: how long after the deadline the gun is planned.
-    /// - Parameter wakeable: a detector event may end the sleep early; the
-    ///   caller then looks at what changed and waits again.
-    private func wait(until deadline: MonotonicTimestamp, gunIn: TimeInterval, wakeable: Bool = false) async -> Bool {
-        let windowStart = MonotonicTimestamp(seconds: deadline.seconds + gunIn - Self.precisionLead)
+        while true {
+            switch movementDetector.cameraCondition {
+            case .off:
+                return nil
         
-        if windowStart <= deadline {
-            guard await sleep(until: windowStart, wakeable: wakeable) else { return false }
+            case .delivering:
+                if let setup = movementDetector.cameraSetup {
+                    record(.camera(.prepared(setup)), source: movementDetector.source)
+                }
+                return nil
             
-            // Woken early: the caller looks at what changed first.
-            guard !(wakeable && wasWokenEarly) else { return true }
+            case .failed(let fault):
+                logger.error("No frames before the start: \(String(describing: fault), privacy: .public)")
+                return .failed(String(localized: "The camera isn't delivering any pictures, so the start was cancelled."))
             
-            beginPrecisionWindow()
+            case .starting:
+                guard clock.now() < deadline else {
+                    logger.error("No frame within \(Self.cameraStartupTimeout, format: .fixed(precision: 1)) s of the start")
+                    return .failed(String(localized: "The camera isn't delivering any pictures, so the start was cancelled."))
+                }
+                
+                guard await sleep(until: deadline, wakeable: true) else { return .cancelled }
+            }
         }
-        
-        return await sleep(until: deadline, wakeable: wakeable)
     }
     
     /// False if cancelled.
@@ -984,12 +1220,24 @@ final class StarterEngine {
             return
         }
         
-        let roster = movementDetector.startMonitoring(profile: profile)
+        // A measurement judges nobody: an athlete in view must not hold up
+        // or recall it.
+        let roster: AthleteRoster
+        if isProbing {
+            movementDetector.startProbing(probeRegions)
+            roster = .empty
+        } else {
+            roster = movementDetector.startMonitoring(profile: profile)
+        }
         self.roster = roster
         monitoringActive = true
-        
+
         record(.monitoringStarted, source: .system)
         record(.rosterEstablished(roster), source: movementDetector.source)
+
+        if isProbing {
+            record(.probingStarted(probeRegions), source: movementDetector.source)
+        }
         
         // From the hold on: a false start can happen from here.
         if recordsVideo, recorder?.beginRecording() == true {

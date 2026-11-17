@@ -33,7 +33,9 @@ struct AudioOutputSection: View {
         } header: {
             Text("Audio output")
         } footer: {
-            if vm.canCalibrateOutput {
+            if vm.wirelessOutput != nil {
+                Text("Bluetooth and other wireless outputs delay the sound by an amount that can change while they play. A calibration measures it once, so reaction times stay less accurate than on the iPhone speaker or a wired speaker. Calibration plays the start signal six times and listens with the microphone: turn the volume up and hold the speaker next to the iPhone, in a quiet room.")
+            } else if vm.canCalibrateOutput {
                 Text("Calibration plays the start signal six times and listens with the microphone. Turn the volume up and hold the headphones or speaker next to the iPhone, in a quiet room.")
             } else {
                 Text("The iPhone speaker reports its latency precisely, so it needs no calibration.")

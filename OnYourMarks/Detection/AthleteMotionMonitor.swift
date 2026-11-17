@@ -8,11 +8,32 @@ import Foundation
 
 /// Watches every athlete on the roster: whether they hold still, and their
 /// first movement once they do.
+///
+/// A movement takes two pieces of evidence: the pose that crossed the
+/// threshold and the athlete's next judged pose agreeing with it. Before the
+/// gun a movement recalls the start, and shortly after it one too fast does,
+/// so a single wrong pose from pose detection must not be able to. The
+/// movement is still timed from the first pose; only its report waits.
 nonisolated struct AthleteMotionMonitor: Sendable {
+    /// How long a crossing pose waits for the athlete's next judged pose.
+    /// Normally that is the next analysed frame: about 11 ms at the
+    /// precision rate (88 poses a second measured at 120 fps), 67 ms at the
+    /// idle rate. The bound only matters when poses are missing: one frame
+    /// at the idle rate under serious pressure (5 fps, 0.2 s) still counts,
+    /// and at 15 fps two missed poses do. A crossing that waits longer is
+    /// given up, not confirmed: a recall that comes a frame late is
+    /// harmless, one that comes from a single wrong pose is not. Reasoned.
+    static let confirmationWait: TimeInterval = 0.25
+
     private(set) var roster: AthleteRoster?
     private var stability: [AthleteID: AthleteStability] = [:]
     private var trackStates: [AthleteID: AthleteTrackState] = [:]
     private var wasReady = false
+
+    /// Crossings waiting for a second pose, by athlete.
+    private var candidates: [AthleteID: MovementObservation] = [:]
+    /// Given up outside of a frame; reported with the next one.
+    private var droppedCandidates: [DetectorEvent] = []
 
     /// Where each roster athlete stands between moving and stable.
     var phases: [AthleteID: AthleteStability.Phase] {
@@ -54,6 +75,8 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         self.roster = roster
         stability = [:]
         trackStates = [:]
+        candidates = [:]
+        droppedCandidates = []
 
         for member in members {
             stability[member.id] = AthleteStability(profile: profile)
@@ -64,20 +87,45 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         return roster
     }
 
-    mutating func end() {
+    /// Ends the monitoring. Returns the crossings that were still waiting
+    /// for a second pose, given up.
+    @discardableResult
+    mutating func end() -> [DetectorEvent] {
+        let unconfirmed = droppedCandidates + giveUp(candidates.keys, because: .monitoringEnded)
+
         roster = nil
         stability = [:]
         trackStates = [:]
+        candidates = [:]
+        droppedCandidates = []
         wasReady = false
+        return unconfirmed
     }
 
     /// Makes an athlete, or with nil everyone, become still again before
     /// they count as ready.
     mutating func resettle(_ athlete: AthleteID?) {
+        droppedCandidates += giveUp(candidates.keys.filter { athlete == nil || athlete == $0 }, because: .resettled)
+
         for id in stability.keys where athlete == nil || athlete == id {
             stability[id]?.resettle()
         }
         wasReady = isReady
+    }
+
+    /// Withdraws the athletes' crossings and reports them, oldest first.
+    private mutating func giveUp(
+        _ athletes: some Sequence<AthleteID>,
+        because reason: UnconfirmedMovement.Reason
+    ) -> [DetectorEvent] {
+        let given = athletes
+            .compactMap { id in candidates.removeValue(forKey: id).map { (id, $0) } }
+            .sorted { $0.1.time < $1.1.time }
+
+        return given.map { id, candidate in
+            stability[id]?.withdrawStart()
+            return .movementUnconfirmed(UnconfirmedMovement(candidate, athleteID: id, reason: reason))
+        }
     }
 
     /// Takes the athletes of one frame and returns what happened in it.
@@ -92,8 +140,10 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         camera: CameraShift = .measured(.zero),
         at time: MonotonicTimestamp
     ) -> [DetectorEvent] {
-        var events: [DetectorEvent] = []
-        guard roster != nil else { return events }
+        guard roster != nil else { return [] }
+
+        var events = droppedCandidates
+        droppedCandidates = []
 
         for athlete in athletes {
             guard let previousState = trackStates[athlete.id] else { continue }
@@ -112,6 +162,19 @@ nonisolated struct AthleteMotionMonitor: Sendable {
                 CGPoint(x: $0.x - cameraOffset.x, y: $0.y - cameraOffset.y)
             }
 
+            if let candidate = candidates.removeValue(forKey: athlete.id) {
+                let movement = stability[athlete.id]?.movement(of: joints, aspectRatio: athlete.pose.aspectRatio)
+
+                if let movement, let profile = stability[athlete.id]?.profile, movement > profile.movementThreshold {
+                    events.append(.movement(candidate.confirmed(at: time)))
+                    continue
+                }
+
+                // The crossing stood alone. This frame is judged like any other.
+                stability[athlete.id]?.withdrawStart()
+                events.append(.movementUnconfirmed(UnconfirmedMovement(candidate, athleteID: athlete.id, reason: .contradicted)))
+            }
+
             let event = stability[athlete.id]?.process(joints, aspectRatio: athlete.pose.aspectRatio, at: time)
             let observation = MovementObservation(
                 time: time,
@@ -122,13 +185,16 @@ nonisolated struct AthleteMotionMonitor: Sendable {
 
             switch event {
             case .started:
-                events.append(.movement(observation))
+                candidates[athlete.id] = observation
             case .unsteady:
                 events.append(.unsteady(observation))
             case .becameStable, nil:
                 break
             }
         }
+
+        let overdue = candidates.filter { time.seconds - $0.value.time.seconds > Self.confirmationWait }.keys
+        events += giveUp(camera == .lost ? Array(candidates.keys) : Array(overdue), because: .notSeenAgain)
 
         if camera == .lost {
             for id in stability.keys {

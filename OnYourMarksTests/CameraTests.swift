@@ -514,45 +514,176 @@ struct CameraControllerTests {
         camera.start()
         try await Task.sleep(for: .seconds(2))
 
+        var reports: [CameraReport] = []
+        camera.onReport = { reports.append($0) }
+
         var report = ""
-        var delays: [TimeInterval] = []
+        var delays: [PrecisionRateReport.Outcome: [TimeInterval]] = [:]
+        var restartDurations: [TimeInterval] = []
 
         for window in 1...12 {
+            reports.removeAll()
             let began = CACurrentMediaTime()
             camera.setMode(.precision)
-            try await Task.sleep(for: .seconds(1.5))
-            let precision = log.rate(since: CACurrentMediaTime() - 0.8)
 
-            // The switch is over with the first two frames that follow
-            // each other at the precision rate.
+            // The monitor decides within its deadlines, a restart included.
+            await waitUntil(timeout: .seconds(5)) { camera.isSteady }
+            try await Task.sleep(for: .seconds(1))
+            let precision = log.rate(since: CACurrentMediaTime() - 0.8)
+            let delivery = camera.precisionDelivery()
+
             let captured = log.frames.withLock { $0.map(\.captured).filter { $0 >= began } }
-            let arrived = zip(captured, captured.dropFirst()).first { $1 - $0 < 1.5 / expected }?.0
             let longestGap = zip(captured, captured.dropFirst()).map { $1 - $0 }.max() ?? 0
 
             camera.setMode(.idle)
             try await Task.sleep(for: .seconds(1))
             let idle = log.rate(since: CACurrentMediaTime() - 0.6)
 
-            if let arrived {
-                delays.append(arrived - began)
+            let rate = reports.lazy.compactMap { if case .precisionRate(let rate) = $0 { rate } else { nil } }.first
+            let outcome = rate?.outcome.rawValue ?? "undecided"
+
+            if let rate {
+                delays[rate.outcome, default: []].append(rate.delay ?? (CACurrentMediaTime() - began))
+                if let restartedAt = rate.restartedAt {
+                    restartDurations.append(restartedAt.seconds - rate.requestedAt.seconds - PrecisionWindowMonitor.arrivalDeadline)
+                }
             }
+
             report += """
-            window \(window): precision \(precision) fps after \(arrived.map { "\(($0 - began) * 1000) ms" } ?? "never"), \
+            window \(window): \(outcome) after \(rate?.delay.map { "\($0 * 1000) ms" } ?? "-"), \
+            restarted: \(rate?.restartedAt != nil), \
+            delivered \(delivery?.deliveredFrameRate ?? 0) fps (log \(precision) fps), \
             longest gap \(longestGap * 1000) ms, idle again \(idle) fps
 
             """
 
+            #expect(rate != nil && rate?.outcome != .missed)
             #expect(precision > expected * 0.9)
             #expect(abs(idle - CameraFrameRatePolicy.idle) < 2)
         }
 
         camera.stop()
 
-        let sorted = delays.sorted()
-        if let last = sorted.last {
-            report += "idle to precision: median \(sorted[sorted.count / 2] * 1000) ms, longest \(last * 1000) ms\n"
+        for outcome in [PrecisionRateReport.Outcome.arrived, .arrivedAfterRestart, .missed] {
+            let sorted = (delays[outcome] ?? []).sorted()
+            guard let last = sorted.last else {
+                report += "\(outcome.rawValue): 0 windows\n"
+                continue
+            }
+            report += """
+            \(outcome.rawValue): \(sorted.count) windows, asked to arrived median \(sorted[sorted.count / 2] * 1000) ms, \
+            longest \(last * 1000) ms
+
+            """
+        }
+        if let longest = restartDurations.max() {
+            report += "restart done after the deadline (stop and start, plus up to one watchdog tick): longest \(longest * 1000) ms\n"
         }
         Attachment.record(report, named: "Precision rate every time")
+
+        // Lets the session let go of the camera before the next test takes it.
+        try await Task.sleep(for: .seconds(2))
+    }
+
+    /// Exposure, focus and white balance are locked once the rate has
+    /// arrived and the picture settled; from then on every frame must carry
+    /// the same exposure time and ISO, and the exposure must stay within
+    /// the cap. Also how long settling took.
+    @Test(.enabled(if: cameraRequested))
+    func exposureIsHeldThroughThePrecisionWindow() async throws {
+        let camera = CameraController()
+        var reports: [(report: CameraReport, at: TimeInterval)] = []
+        camera.onReport = { reports.append(($0, CACurrentMediaTime())) }
+
+        try #require(camera.configureIfNeeded())
+        camera.start()
+        try await Task.sleep(for: .seconds(2))
+
+        var report = ""
+
+        for window in 1...5 {
+            reports.removeAll()
+            let began = CACurrentMediaTime()
+            camera.setMode(.precision)
+
+            await waitUntil(timeout: .seconds(5)) { camera.isSteady }
+            try await Task.sleep(for: .seconds(2))
+
+            let delivery = try #require(camera.precisionDelivery())
+            camera.setMode(.idle)
+            try await Task.sleep(for: .seconds(1))
+
+            let arrival = reports.first { if case .precisionRate = $0.report { true } else { false } }
+            let locked = reports.first { if case .settingsLocked = $0.report { true } else { false } }
+            guard case .settingsLocked(let settings)? = locked?.report else {
+                Issue.record("Window \(window) did not lock its settings")
+                continue
+            }
+
+            let exposures = try #require(delivery.exposureDurations, "the frames carry no exposure time")
+            let isos = try #require(delivery.isoValues)
+
+            report += """
+            window \(window): steady \(((locked?.at ?? began) - began) * 1000) ms after asking, \
+            \(((locked?.at ?? 0) - (arrival?.at ?? 0)) * 1000) ms after the rate was reported, settled: \(settings.hadSettled)
+              held: exposure \(settings.exposureDuration * 1000) ms (cap \((settings.maximumExposureDuration ?? 0) * 1000) ms), \
+            ISO \(settings.iso), locked exposure/focus/white balance \(settings.isExposureLocked)/\(settings.isFocusLocked)/\(settings.isWhiteBalanceLocked)
+              frames: exposure \(exposures.lowerBound * 1000)...\(exposures.upperBound * 1000) ms, \
+            ISO \(isos.lowerBound)...\(isos.upperBound), \(delivery.frames) frames at \(delivery.deliveredFrameRate ?? 0) fps
+
+            """
+
+            #expect(settings.isExposureLocked)
+            #expect(exposures.upperBound - exposures.lowerBound < PrecisionWindowMonitor.exposureTolerance)
+            #expect(isos.upperBound == isos.lowerBound)
+            if let cap = settings.maximumExposureDuration {
+                #expect(exposures.upperBound <= cap + PrecisionWindowMonitor.exposureTolerance)
+            }
+        }
+
+        camera.stop()
+        Attachment.record(report, named: "Exposure held in the precision window")
+
+        // Lets the session let go of the camera before the next test takes it.
+        try await Task.sleep(for: .seconds(2))
+    }
+
+    /// `isDelivering` is true once frames arrive, not when the session is
+    /// asked to run, and false again when it is stopped.
+    @Test(.enabled(if: cameraRequested))
+    func deliveringBeginsWithTheFirstFrame() async throws {
+        let camera = CameraController()
+        let log = FrameLog()
+
+        camera.setFrameHandler { frame in
+            log.frames.withLock { $0.append((frame.timestamp.seconds, CACurrentMediaTime())) }
+        }
+
+        try #require(camera.configureIfNeeded())
+
+        let began = CACurrentMediaTime()
+        camera.start()
+        #expect(!camera.isDelivering)
+        #expect(camera.condition == .starting)
+
+        await waitUntil(timeout: .seconds(5)) { camera.isDelivering }
+        let delivering = CACurrentMediaTime()
+        let firstFrame = try #require(log.frames.withLock { $0.first?.arrived })
+
+        #expect(firstFrame <= delivering)
+        #expect(camera.condition == .delivering(isSteady: false))
+
+        camera.stop()
+        #expect(!camera.isDelivering)
+        #expect(camera.condition == .off)
+
+        Attachment.record(
+            """
+            start to first frame: \((firstFrame - began) * 1000) ms
+            start to delivering: \((delivering - began) * 1000) ms
+            """,
+            named: "Delivering begins with the first frame"
+        )
 
         // Lets the session let go of the camera before the next test takes it.
         try await Task.sleep(for: .seconds(2))

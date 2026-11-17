@@ -40,6 +40,14 @@ final class PoseMotionDetector: MovementDetector {
     private nonisolated let tracking = Mutex(Tracking())
     private nonisolated let motion = Mutex(MotionTimeline())
     private nonisolated let statistics = Mutex(DetectionStatistics())
+    private nonisolated let probes = Mutex(Probes())
+
+    /// The regions a measurement watches, each with its own step detector.
+    /// Shared between the capture queue and the main actor.
+    private nonisolated struct Probes {
+        var regions: [ProbeRegion] = []
+        var detectors: [UUID: ProbeStepDetector] = [:]
+    }
 
     /// Pose detection takes longer than a frame lasts at the precision
     /// rate, so it gets its own queue and must not hold up the sampling.
@@ -75,6 +83,46 @@ final class PoseMotionDetector: MovementDetector {
         camera.setFrameHandler { [weak self] frame in
             self?.process(frame)
         }
+
+        // Called on the main actor.
+        camera.onReport = { [weak self] report in
+            self?.handleCamera(report)
+        }
+    }
+
+    var cameraCondition: CameraCondition {
+        camera.condition
+    }
+
+    var cameraSetup: CameraSetup? {
+        camera.setup
+    }
+
+    func precisionDelivery() -> PrecisionRateDelivery? {
+        camera.precisionDelivery()
+    }
+
+    /// A restarted session leaves a gap in the frames. Stillness seen before
+    /// it says nothing about after it, so everyone becomes still again on
+    /// the new frames, and a handheld camera takes a new reference: its
+    /// picture may not match the old one. The onset analysis does not reach
+    /// back across the gap by itself (`MotionOnsetAnalyzer.largestGap`).
+    private func handleCamera(_ report: CameraReport) {
+        if report == .restarted {
+            let (ready, wasReady) = tracking.withLock {
+                let wasReady = $0.monitor.isReady
+                $0.monitor.resettle(nil)
+                $0.needsCameraReference = true
+                return ($0.monitor.isReady, wasReady)
+            }
+            isReady = ready
+
+            if ready != wasReady {
+                onEvent?(.readinessChanged(ready))
+            }
+        }
+
+        onEvent?(.camera(report))
     }
 
     @discardableResult
@@ -100,19 +148,29 @@ final class PoseMotionDetector: MovementDetector {
     }
 
     func stopMonitoring() {
-        tracking.withLock {
-            $0.monitor.end()
+        let unconfirmed = tracking.withLock {
             $0.tracker.retained = []
+            return $0.monitor.end()
         }
         let records = motion.withLock { timeline in
             defer { timeline.reset() }
             return timeline.records
         }
+        probes.withLock { $0 = Probes() }
         isReady = false
+
+        for event in unconfirmed {
+            onEvent?(event)
+        }
 
         for record in records {
             onEvent?(.motionSampled(record))
         }
+    }
+
+    func startProbing(_ regions: [ProbeRegion]) {
+        probes.withLock { $0 = Probes(regions: regions) }
+        statistics.withLock { $0 = DetectionStatistics() }
     }
 
     /// Forgets the athletes; the next ones in view get new IDs.
@@ -124,6 +182,10 @@ final class PoseMotionDetector: MovementDetector {
         }
     }
 
+    /// Pose detection takes the frames at whatever rate they come; the
+    /// onset analysis only uses those at the rate of the confirmation
+    /// (`MotionOnsetAnalyzer.steadyStretch`), so the idle frames from the
+    /// beginning of the hold are left out by themselves.
     func beginPrecisionWindow() {
         camera.setMode(.precision)
     }
@@ -162,8 +224,49 @@ final class PoseMotionDetector: MovementDetector {
         }
     }
 
+    /// Looks for a step in every probed region of the frame, with the same
+    /// timestamp the athletes' samples get.
+    private nonisolated func probe(_ frame: CameraFrame) {
+        let regions = probes.withLock { $0.regions }
+        guard !regions.isEmpty else { return }
+
+        let width = CVPixelBufferGetWidth(frame.pixelBuffer)
+        let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+
+        let samples = regions.compactMap { region in
+            MotionSampler.cells(
+                of: frame.pixelBuffer,
+                in: MotionSampler.bufferRegion(for: region.rect, bufferWidth: width, bufferHeight: height)
+            ).map { (region, MotionSample(time: frame.timestamp, cells: $0)) }
+        }
+
+        let observations = probes.withLock { state in
+            samples.compactMap { region, sample -> ProbeObservation? in
+                // Probing may have ended or begun anew meanwhile.
+                guard state.regions.contains(region) else { return nil }
+
+                return state.detectors[region.id, default: ProbeStepDetector()]
+                    .process(sample)
+                    .map { ProbeObservation($0, in: region) }
+            }
+        }
+        statistics.withLock { $0.sampledFrames += 1 }
+
+        guard !observations.isEmpty else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self, probes.withLock({ !$0.regions.isEmpty }) else { return }
+
+            for observation in observations {
+                onEvent?(.probeChanged(observation))
+            }
+        }
+    }
+
     /// Keeps what every watched athlete's part of the frame looks like.
     private nonisolated func sample(_ frame: CameraFrame) {
+        probe(frame)
+
         let regions = motion.withLock { $0.regions }
         guard !regions.isEmpty else { return }
 

@@ -13,7 +13,11 @@ struct ReactionTimes: View {
     var selected: AthleteID?
     /// Makes the times tappable.
     var onSelect: ((AthleteStartResult) -> Void)?
-    
+    /// The second pass over the recorded video, shown under each live time.
+    var analysis: RecordingAnalysis?
+    /// Whether the second pass is still running.
+    var isAnalysing = false
+
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
@@ -47,11 +51,15 @@ struct ReactionTimes: View {
                     .background(color(for: result.decision), in: Circle())
             }
             
-            if let reaction = result.reactionMilliseconds, let tolerance = result.reactionToleranceMilliseconds {
-                // The tolerance belongs to the number: it is a measurement, not a verdict.
-                Text("\(reaction) ms ± \(tolerance) ms")
-            } else {
-                Text("Before the gun")
+            VStack(alignment: .leading, spacing: 2) {
+                if let reaction = result.reactionMilliseconds, let tolerance = result.reactionToleranceMilliseconds {
+                    // The tolerance belongs to the number: it is a measurement, not a verdict.
+                    Text("\(reaction) ms ± \(tolerance) ms")
+                } else {
+                    Text("Before the gun")
+                }
+
+                secondPass(for: result)
             }
         }
         .font(.subheadline.monospacedDigit())
@@ -69,6 +77,28 @@ struct ReactionTimes: View {
         }
     }
     
+    /// What the second pass found for the athlete, smaller under the live
+    /// time. Only a measurement: the decision stays the live one.
+    @ViewBuilder
+    private func secondPass(for result: AthleteStartResult) -> some View {
+        Group {
+            if let athlete = analysis?.athlete(result.athleteID) {
+                if let reaction = athlete.reaction?.milliseconds, let tolerance = athlete.reaction?.toleranceMilliseconds {
+                    Text("From the video: \(reaction) ms ± \(tolerance) ms")
+                } else if athlete.movement != nil {
+                    Text("From the video: before the gun")
+                } else {
+                    Text("From the video: not found")
+                }
+            } else if isAnalysing {
+                Text("Analysing the video…")
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.white.opacity(0.75))
+        .accessibilityIdentifier("secondPassReaction")
+    }
+
     private func color(for decision: StartDecision) -> Color {
         decision.color
     }
@@ -77,12 +107,25 @@ struct ReactionTimes: View {
 nonisolated extension AthleteStartResult {
     /// The most likely reaction time; nil for a movement before the gun.
     var reactionMilliseconds: Int? {
-        reaction.map { Int(($0.best * 1000).rounded()) }
+        reaction?.milliseconds
     }
-    
+
     /// How far the reaction may be off to either side, rounded up so the
     /// display never promises more than was measured.
     var reactionToleranceMilliseconds: Int? {
-        reaction.map { Int((max($0.best - $0.earliest, $0.latest - $0.best) * 1000).rounded(.up)) }
+        reaction?.toleranceMilliseconds
+    }
+}
+
+nonisolated extension DurationEstimate {
+    /// The most likely value, in whole milliseconds.
+    var milliseconds: Int {
+        Int((best * 1000).rounded())
+    }
+
+    /// How far the value may be off to either side, rounded up so the
+    /// display never promises more than was measured.
+    var toleranceMilliseconds: Int {
+        Int((max(best - earliest, latest - best) * 1000).rounded(.up))
     }
 }

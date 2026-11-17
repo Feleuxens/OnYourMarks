@@ -22,11 +22,19 @@ final class StartRecordingController: StartRecorder {
         finishing > 0
     }
 
+    /// The recording the second pass is working on.
+    private(set) var analysing: UUID?
+
+    /// The second passes that are loaded, by recording.
+    private(set) var analyses: [UUID: RecordingAnalysis] = [:]
+
     @ObservationIgnored private let source: FrameSource
     @ObservationIgnored private let store: RecordingStore
+    @ObservationIgnored private let analyser: (any RecordingAnalyser)?
 
     @ObservationIgnored private var capture: Capture?
     @ObservationIgnored private var tailTask: Task<Void, Never>?
+    @ObservationIgnored private var analysisTask: Task<Void, Never>?
     private var finishing = 0
 
     @ObservationIgnored private let logger = Logger(
@@ -51,9 +59,16 @@ final class StartRecordingController: StartRecorder {
         }
     }
 
-    init(source: FrameSource, store: RecordingStore = RecordingStore()) {
+    /// - Parameter analyser: runs the second pass over each kept recording;
+    ///   nil for none.
+    init(
+        source: FrameSource,
+        store: RecordingStore = RecordingStore(),
+        analyser: (any RecordingAnalyser)? = SecondPassAnalyser()
+    ) {
         self.source = source
         self.store = store
+        self.analyser = analyser
 
         last = store.recordings(in: .temporary).first
         saved = store.recordings(in: .library)
@@ -69,6 +84,9 @@ final class StartRecordingController: StartRecorder {
     func beginRecording() -> Bool {
         // A start right after another: the earlier one's tail ends here.
         flush()
+
+        // The new start needs the phone; the review can run the pass again.
+        cancelAnalysis()
 
         guard source.isDelivering else { return false }
 
@@ -186,6 +204,7 @@ final class StartRecordingController: StartRecorder {
         )
 
         last = recording
+        analyse(recording)
     }
 
     private func isSuperseded(_ recording: StartRecording) -> Bool {
@@ -216,6 +235,102 @@ final class StartRecordingController: StartRecorder {
                 await controller?.complete(capture, summary)
             }
         }
+    }
+
+    // MARK: - Second pass
+
+    /// What the second pass found in a recording, once it is loaded.
+    func analysis(of recording: StartRecording) -> RecordingAnalysis? {
+        analyses[recording.id]
+    }
+
+    /// Loads the second pass over a recording from its folder. A recording
+    /// whose pass never finished, e.g. because the next start began, is
+    /// analysed now, unless a start is being recorded.
+    func loadAnalysis(of recording: StartRecording) async {
+        guard analyses[recording.id] == nil else { return }
+
+        if let stored = await Self.loadAnalysis(of: recording.id, in: location(of: recording), from: store) {
+            analyses[recording.id] = stored
+            return
+        }
+
+        if capture == nil, analysing == nil {
+            analyse(recording)
+        }
+    }
+
+    /// Runs the second pass at low priority, off the main actor. Only one
+    /// runs at a time; the newest recording goes first.
+    private func analyse(_ recording: StartRecording) {
+        guard let analyser else { return }
+
+        cancelAnalysis()
+        analysing = recording.id
+
+        let id = recording.id
+        let directory = store.directory(of: id, in: location(of: recording))
+
+        analysisTask = Task(priority: .background) { [weak self] in
+            let analysis = await Self.run(analyser, on: directory)
+
+            // A cancelled pass leaves the state to whoever cancelled it.
+            guard let self, !Task.isCancelled else { return }
+
+            analysisTask = nil
+            analysing = nil
+
+            guard let analysis else { return }
+
+            analyses[id] = analysis
+            logger.info(
+                """
+                Second pass: \(analysis.frames.decoded) frames, \(analysis.frames.withPose) with a pose, \
+                \(analysis.duration, format: .fixed(precision: 1)) s
+                """
+            )
+
+            // Wherever the recording is by now; not at all if it was deleted.
+            guard let recording = last?.id == id ? last : saved.first(where: { $0.id == id }) else { return }
+            await Self.write(analysis, in: location(of: recording), to: store)
+        }
+    }
+
+    private func cancelAnalysis() {
+        analysisTask?.cancel()
+        analysisTask = nil
+        analysing = nil
+    }
+
+    @concurrent
+    private nonisolated static func run(_ analyser: any RecordingAnalyser, on directory: URL) async -> RecordingAnalysis? {
+        do {
+            return try await analyser.analyse(RecordedStart.load(from: directory))
+        } catch is CancellationError {
+            return nil
+        } catch {
+            Logger(subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks", category: "Recording")
+                .error("The second pass failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    @concurrent
+    private nonisolated static func write(
+        _ analysis: RecordingAnalysis,
+        in location: RecordingStore.Location,
+        to store: RecordingStore
+    ) async {
+        _ = try? store.write(analysis, in: location)
+    }
+
+    @concurrent
+    private nonisolated static func loadAnalysis(
+        of id: UUID,
+        in location: RecordingStore.Location,
+        from store: RecordingStore
+    ) async -> RecordingAnalysis? {
+        store.analysis(of: id, in: location)
     }
 
     // MARK: - Library
@@ -251,6 +366,10 @@ final class StartRecordingController: StartRecorder {
     }
 
     func delete(_ recording: StartRecording) {
+        if analysing == recording.id {
+            cancelAnalysis()
+        }
+        analyses[recording.id] = nil
         store.delete(recording.id, in: location(of: recording))
 
         saved.removeAll { $0.id == recording.id }

@@ -29,9 +29,22 @@
 		BF96BF5E2FDA172F00C0AC62 /* OnYourMarksUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OnYourMarksUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		BF0C1A0B2FE5000000C0AC62 /* Exceptions for "OnYourMarks" folder in "OnYourMarks" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = BF96BF462FDA172E00C0AC62 /* OnYourMarks */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		BF96BF492FDA172E00C0AC62 /* OnYourMarks */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				BF0C1A0B2FE5000000C0AC62 /* Exceptions for "OnYourMarks" folder in "OnYourMarks" target */,
+			);
 			path = OnYourMarks;
 			sourceTree = "<group>";
 		};
@@ -407,8 +420,10 @@
 				DEVELOPMENT_TEAM = 2PHW6Z6SJA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OnYourMarks/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_NSCameraUsageDescription = "OnYourMarks uses the camera to detect false starts.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OnYourMarks connects to your other phones nearby to time starts together.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OnYourMarks uses the microphone to play on the iPhone speaker and to measure audio latency.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -440,8 +455,10 @@
 				DEVELOPMENT_TEAM = 2PHW6Z6SJA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OnYourMarks/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_NSCameraUsageDescription = "OnYourMarks uses the camera to detect false starts.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "OnYourMarks connects to your other phones nearby to time starts together.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OnYourMarks uses the microphone to play on the iPhone speaker and to measure audio latency.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

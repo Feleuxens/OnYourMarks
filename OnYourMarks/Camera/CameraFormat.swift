@@ -10,8 +10,9 @@ nonisolated enum CameraMode: String, Sendable {
     /// Preview and framing: a low frame rate keeps the phone cool.
     case idle
 
-    /// Around the gun, when a movement has to be timed: the highest frame
-    /// rate, held whatever the system pressure.
+    /// From the beginning of the hold to the end of the run, when a
+    /// movement has to be timed: the highest frame rate, held whatever the
+    /// system pressure, with exposure, focus and white balance held too.
     case precision
 }
 
@@ -118,7 +119,10 @@ nonisolated enum CameraFrameRatePolicy {
     static let throttledIdle: Double = 5
 
     /// The precision rate is never throttled: a start in progress is worth
-    /// more than the little heat a few seconds save.
+    /// more than the heat the hold costs. The window lasts from the
+    /// beginning of the hold to the end of the run, seconds as a rule and
+    /// at most 80 s (a readiness timeout and a hold of 10 s each, for the
+    /// first try and three restarts).
     static func frameRate(
         for mode: CameraMode,
         pressure: CameraPressureLevel,

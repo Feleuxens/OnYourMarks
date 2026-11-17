@@ -74,6 +74,26 @@ nonisolated enum CalibrationMath {
         window: ClosedRange<TimeInterval>,
         noiseWindow: ClosedRange<TimeInterval>
     ) -> TimeInterval? {
+        detectOnset(in: chunks, window: window, noiseWindow: noiseWindow)?.time
+    }
+
+    /// An onset, and how clearly it stood out from the noise before it.
+    struct DetectedOnset: Equatable, Sendable {
+        /// The sample's timestamp.
+        let time: TimeInterval
+        let sampleRate: Double
+
+        /// Peak magnitude in the window, RMS of the noise.
+        let peak: Float
+        let noise: Float
+    }
+
+    /// Like `onset`, with what it was found against.
+    static func detectOnset(
+        in chunks: [RecordedChunk],
+        window: ClosedRange<TimeInterval>,
+        noiseWindow: ClosedRange<TimeInterval>
+    ) -> DetectedOnset? {
         let windowSamples = samples(in: chunks, during: window)
         let noiseSamples = samples(in: chunks, during: noiseWindow)
 
@@ -100,10 +120,15 @@ nonisolated enum CalibrationMath {
             let mean = (sums[end] - sums[index]) / Float(end - index)
             
             if end - index == sustainCount, mean >= threshold {
-                return windowSamples[index].time
+                return DetectedOnset(time: windowSamples[index].time, sampleRate: sampleRate, peak: peak, noise: noise)
             }
         }
         return nil
+    }
+
+    /// Whether the recording holds any sample in the stretch.
+    static func covers(_ chunks: [RecordedChunk], _ range: ClosedRange<TimeInterval>) -> Bool {
+        chunks.contains { $0.end > range.lowerBound && $0.hostSeconds <= range.upperBound }
     }
 
     /// Median of the per-click offsets, and how far the clicks strayed from it.
@@ -155,20 +180,92 @@ nonisolated enum CalibrationMath {
     }
 }
 
+/// Chunks of audio a tap delivers, filled on the audio thread and read on
+/// the main actor.
+nonisolated final class RecordedChunkStore: Sendable {
+    private let chunks = Mutex<[RecordedChunk]>([])
+
+    /// How much audio is kept, counted back from the newest chunk's end;
+    /// nil keeps everything.
+    let retention: TimeInterval?
+
+    init(retention: TimeInterval? = nil) {
+        self.retention = retention
+    }
+
+    func append(_ chunk: RecordedChunk) {
+        chunks.withLock { chunks in
+            chunks.append(chunk)
+
+            guard let retention else { return }
+            let keepFrom = chunk.end - retention
+            if let first = chunks.firstIndex(where: { $0.end > keepFrom }), first > 0 {
+                chunks.removeFirst(first)
+            }
+        }
+    }
+
+    var recorded: [RecordedChunk] {
+        chunks.withLock { $0 }
+    }
+
+    var isEmpty: Bool {
+        chunks.withLock { $0.isEmpty }
+    }
+
+    /// Timestamp just after the newest sample.
+    var coveredUntil: TimeInterval? {
+        chunks.withLock { $0.last?.end }
+    }
+
+    /// Built outside the main actor: the tap runs on an audio thread, and a
+    /// closure written in a main-actor class would be checked for its isolation.
+    func tapBlock() -> AVAudioNodeTapBlock {
+        { [self] buffer, time in
+            guard time.isHostTimeValid, let channel = buffer.floatChannelData?[0] else { return }
+
+            append(
+                RecordedChunk(
+                    hostSeconds: AVAudioTime.seconds(forHostTime: time.hostTime),
+                    sampleRate: buffer.format.sampleRate,
+                    samples: Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+                )
+            )
+        }
+    }
+}
+
+nonisolated extension RecordedChunk {
+    /// Timestamp just after the chunk's last sample.
+    var end: TimeInterval {
+        hostSeconds + Double(samples.count) / sampleRate
+    }
+}
+
 /// Records the built-in microphone on its own engine, so the playback
 /// engine and its graph stay exactly as they are for starts.
 @MainActor
 final class MicrophoneRecorder {
-    /// Filled on the audio thread, read on the main actor.
-    private final class ChunkStore: Sendable {
-        let chunks = Mutex<[RecordedChunk]>([])
-    }
-    
     private let engine = AVAudioEngine()
-    private let store = ChunkStore()
+    private let store: RecordedChunkStore
 
     /// Time from sound reaching the microphone to the sample's timestamp.
     private(set) var inputLatency: TimeInterval = 0
+
+    private(set) var sampleRate: Double = 0
+
+    private(set) var isRecording = false
+
+    /// False once a reconfiguration of the hardware has stopped it.
+    var isRunning: Bool {
+        isRecording && engine.isRunning
+    }
+
+    /// - Parameter retention: how many seconds of the newest audio are
+    ///   kept; nil keeps all of it.
+    init(retention: TimeInterval? = nil) {
+        store = RecordedChunkStore(retention: retention)
+    }
 
     func start() throws {
         let input = engine.inputNode
@@ -184,6 +281,7 @@ final class MicrophoneRecorder {
         
         let nodeLatency = input.presentationLatency
         inputLatency = nodeLatency > 0 ? nodeLatency : AVAudioSession.sharedInstance().inputLatency
+        sampleRate = hardwareFormat.sampleRate
         
         // The non-deprecated, throwing form. The SDK ships no Swift wrapper for
         // it yet, so it's imported with a placeholder for the error argument.
@@ -194,38 +292,42 @@ final class MicrophoneRecorder {
             bufferSize: 1024,
             format: nil,
             error: (),
-            block: Self.tapBlock(appendingTo: store)
+            block: store.tapBlock()
         )
-        
+
         engine.prepare()
-        try engine.start()
-    }
-    
-    /// Built outside the main actor: the tap runs on an audio thread, and a
-    /// closure written in this class would be checked for main-actor isolation.
-    private nonisolated static func tapBlock(appendingTo store: ChunkStore) -> AVAudioNodeTapBlock {
-        { buffer, time in
-            guard time.isHostTimeValid, let channel = buffer.floatChannelData?[0] else { return }
-            
-            let chunk = RecordedChunk(
-                hostSeconds: AVAudioTime.seconds(forHostTime: time.hostTime),
-                sampleRate: buffer.format.sampleRate,
-                samples: Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
-            )
-            store.chunks.withLock { $0.append(chunk) }
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
         }
+        isRecording = true
     }
-    
+
     /// Whether the microphone delivers audio yet, i.e. the hardware has
     /// finished reconfiguring for recording.
     var isReceivingAudio: Bool {
-        store.chunks.withLock { !$0.isEmpty }
+        !store.isEmpty
     }
-    
+
+    /// Timestamp just after the newest sample delivered so far.
+    var coveredUntil: TimeInterval? {
+        store.coveredUntil
+    }
+
+    /// What has been captured so far, while recording goes on.
+    var recorded: [RecordedChunk] {
+        store.recorded
+    }
+
     /// Stops recording and returns what was captured.
     func stop() -> [RecordedChunk] {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        return store.chunks.withLock { $0 }
+        if isRecording {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            isRecording = false
+        }
+        return store.recorded
     }
 }

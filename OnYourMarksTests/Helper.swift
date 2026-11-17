@@ -7,6 +7,7 @@
 import Foundation
 import CoreVideo
 import QuartzCore
+import Synchronization
 import Testing
 import Vision
 @testable import OnYourMarks
@@ -127,6 +128,21 @@ class FakeSignalPlayer: SignalPlayer {
             throw preflightError
         }
         return preflight
+    }
+
+    /// What listening for a scheduled signal comes to, after `hearingDelay`
+    /// on `clock` (at once without one).
+    var hearing: SignalHearing = .notListening
+    var hearingDelay: TimeInterval = 0
+    private(set) var hearRequests: [ScheduledSignal] = []
+
+    func hear(_ scheduled: ScheduledSignal) async -> SignalHearing {
+        hearRequests.append(scheduled)
+
+        if hearingDelay > 0, let clock {
+            await clock.sleep(until: MonotonicTimestamp(seconds: clock.now().seconds + hearingDelay))
+        }
+        return hearing
     }
 }
 
@@ -358,6 +374,63 @@ final class FakeMovementDetector: MovementDetector {
             .trackingChanged(AthleteTrackingChange(athleteID: athlete, state: state, time: MonotonicTimestamp(seconds: time)))
         )
     }
+
+    /// The regions of each measurement.
+    private(set) var probed: [[ProbeRegion]] = []
+
+    func startProbing(_ regions: [ProbeRegion]) {
+        probed.append(regions)
+    }
+    
+    /// Like a detector whose camera is off, the fake has none unless told otherwise.
+    private(set) var cameraCondition = CameraCondition.off
+    var cameraSetup: CameraSetup? = CameraSetup(width: 1920, height: 1080, requestedFrameRate: 120, expectedFrameRate: 120)
+    
+    /// What `precisionDelivery()` returns while the window is open.
+    var delivery: PrecisionRateDelivery?
+    
+    func precisionDelivery() -> PrecisionRateDelivery? {
+        isInPrecisionWindow ? delivery : nil
+    }
+    
+    /// Changes the camera without telling anyone, as before a start.
+    func setCamera(_ condition: CameraCondition) {
+        cameraCondition = condition
+    }
+    
+    /// Changes the camera and reports it, as the real detector does.
+    func changeCamera(to condition: CameraCondition, reporting report: CameraReport) {
+        cameraCondition = condition
+        onEvent?(.camera(report))
+    }
+}
+
+extension CaptureSettings {
+    static func fake(hasSettled: Bool = true) -> CaptureSettings {
+        CaptureSettings(
+            exposureDuration: 0.004,
+            iso: 400,
+            maximumExposureDuration: 1.0 / 240,
+            isExposureLocked: true,
+            isFocusLocked: true,
+            isWhiteBalanceLocked: true,
+            hadSettled: hasSettled
+        )
+    }
+}
+
+extension PrecisionRateDelivery {
+    static func fake(delivered: Double?, requested: Double = 120) -> PrecisionRateDelivery {
+        PrecisionRateDelivery(
+            requestedFrameRate: requested,
+            deliveredFrameRate: delivered,
+            frames: 100,
+            dropped: 0,
+            longestGap: 1 / (delivered ?? 1),
+            exposureDurations: 0.004...0.004,
+            isoValues: 400...400
+        )
+    }
 }
 
 /// Yields until the condition holds, failing the test after the timeout.
@@ -501,6 +574,10 @@ extension [DetectorEvent] {
     
     var readiness: Bool? {
         compactMap { if case .readinessChanged(let ready) = $0 { ready } else { nil } }.last
+    }
+
+    var unconfirmed: [UnconfirmedMovement] {
+        compactMap { if case .movementUnconfirmed(let movement) = $0 { movement } else { nil } }
     }
 }
 
@@ -670,5 +747,208 @@ extension FakeMovementDetector {
     /// The athletes of one analysed frame.
     func emitTracking(at time: TimeInterval, athletes: [TrackedAthlete] = []) {
         onEvent?(.athletesTracked(TrackingFrame(time: MonotonicTimestamp(seconds: time), athletes: athletes)))
+    }
+}
+
+/// Phones in one process, joined by a network the test runs by hand.
+/// Every phone has its own clock, offset and running at its own rate
+/// against the network's true time; datagrams arrive after a delay, in
+/// order of arrival, when the test calls `run(for:)`.
+nonisolated final class SimulatedNetwork: Sendable {
+    nonisolated struct Phone {
+        var offset: TimeInterval
+        var rate: Double
+        var announcement: NodeAnnouncement?
+        var handler: (@Sendable (TransportEvent) -> Void)?
+    }
+
+    private struct State {
+        var now: TimeInterval = 5_000
+        var phones: [String: Phone] = [:]
+        var queue: [(time: TimeInterval, from: String, to: String, data: Data)] = []
+        var outbound: TimeInterval = 0.002
+        var inbound: TimeInterval = 0.002
+    }
+
+    private let state = Mutex(State())
+
+    /// True time.
+    var now: TimeInterval {
+        state.withLock { $0.now }
+    }
+
+    /// Delays of the way from the phone whose name sorts first to the
+    /// others, and back.
+    func setDelays(outbound: TimeInterval, inbound: TimeInterval) {
+        state.withLock {
+            $0.outbound = outbound
+            $0.inbound = inbound
+        }
+    }
+
+    func addPhone(_ name: String, offset: TimeInterval = 0, rate: Double = 0) -> SimulatedTransport {
+        state.withLock { $0.phones[name] = Phone(offset: offset, rate: rate) }
+        return SimulatedTransport(name: name, network: self)
+    }
+
+    /// Makes a phone's clock jump.
+    func shiftClock(of name: String, by seconds: TimeInterval) {
+        state.withLock { $0.phones[name]?.offset += seconds }
+    }
+
+    /// What a phone's host clock reads now.
+    func reading(of name: String) -> MonotonicTimestamp {
+        state.withLock { state in
+            Self.reading(of: state.phones[name], at: state.now)
+        }
+    }
+
+    /// The true offset of one phone's clock from another's: `remote − local`.
+    func offset(of remote: String, from local: String) -> TimeInterval {
+        state.withLock { state in
+            Self.reading(of: state.phones[remote], at: state.now).seconds - Self.reading(of: state.phones[local], at: state.now).seconds
+        }
+    }
+
+    func clock(of name: String) -> @Sendable () -> MonotonicTimestamp {
+        { [self] in reading(of: name) }
+    }
+
+    private static func reading(of phone: Phone?, at time: TimeInterval) -> MonotonicTimestamp {
+        MonotonicTimestamp(seconds: time + (phone?.offset ?? 0) + (phone?.rate ?? 0) * (time - 5_000))
+    }
+
+    fileprivate func start(_ name: String, announcing announcement: NodeAnnouncement, handler: @escaping @Sendable (TransportEvent) -> Void) {
+        let others = state.withLock { state in
+            state.phones[name]?.announcement = announcement
+            state.phones[name]?.handler = handler
+            return state.phones.filter { $0.key != name && $0.value.handler != nil }
+        }
+
+        handler(.stateChanged(.ready))
+
+        for (other, phone) in others {
+            if let found = phone.announcement {
+                handler(.peerFound(PeerAddress(rawValue: other), txtRecord: found.txtRecord))
+            }
+            phone.handler?(.peerFound(PeerAddress(rawValue: name), txtRecord: announcement.txtRecord))
+        }
+    }
+
+    fileprivate func stop(_ name: String) {
+        state.withLock { $0.phones[name]?.handler = nil }
+    }
+
+    fileprivate func send(_ data: Data, from: String, to: String) {
+        state.withLock { state in
+            let first = state.phones.keys.sorted().first
+            let delay = from == first ? state.outbound : state.inbound
+            state.queue.append((state.now + delay, from, to, data))
+        }
+    }
+
+    /// Delivers everything due within the next `duration` seconds of true
+    /// time, including what the deliveries send, and moves the time on.
+    func run(for duration: TimeInterval) {
+        let end = now + duration
+
+        while true {
+            let due = state.withLock { state -> (handler: (@Sendable (TransportEvent) -> Void)?, datagram: ReceivedDatagram)? in
+                guard
+                    let index = state.queue.indices.min(by: { state.queue[$0].time < state.queue[$1].time }),
+                    state.queue[index].time <= end
+                else { return nil }
+
+                let item = state.queue.remove(at: index)
+                state.now = max(state.now, item.time)
+
+                return (
+                    state.phones[item.to]?.handler,
+                    ReceivedDatagram(
+                        data: item.data,
+                        from: PeerAddress(rawValue: item.from),
+                        receivedAt: Self.reading(of: state.phones[item.to], at: state.now),
+                        kernelReceivedAt: nil
+                    )
+                )
+            }
+
+            guard let due else { break }
+            due.handler?(.received(due.datagram))
+        }
+
+        state.withLock { $0.now = max($0.now, end) }
+    }
+}
+
+nonisolated final class SimulatedTransport: DatagramTransport {
+    let name: String
+    private let network: SimulatedNetwork
+
+    fileprivate init(name: String, network: SimulatedNetwork) {
+        self.name = name
+        self.network = network
+    }
+
+    func start(announcing announcement: NodeAnnouncement, handler: @escaping @Sendable (TransportEvent) -> Void) {
+        network.start(name, announcing: announcement, handler: handler)
+    }
+
+    func stop() {
+        network.stop(name)
+    }
+
+    func send(_ data: Data, to peer: PeerAddress) {
+        network.send(data, from: name, to: peer.rawValue)
+    }
+}
+
+/// A second pass that finds nothing but says it ran, at once or, while
+/// `holds` is set, only once it is cancelled.
+final class FakeRecordingAnalyser: RecordingAnalyser {
+    private struct State {
+        var holds = false
+        var started: [UUID] = []
+        var cancelled: [UUID] = []
+    }
+
+    private let state = Mutex(State())
+
+    var holds: Bool {
+        get { state.withLock { $0.holds } }
+        set { state.withLock { $0.holds = newValue } }
+    }
+
+    /// The recordings a pass began on, and those it was cancelled on.
+    var started: [UUID] { state.withLock { $0.started } }
+    var cancelled: [UUID] { state.withLock { $0.cancelled } }
+
+    @concurrent
+    func analyse(_ start: RecordedStart) async throws -> RecordingAnalysis? {
+        let id = start.recording.id
+        let holds = state.withLock {
+            $0.started.append(id)
+            return $0.holds
+        }
+
+        if holds {
+            do {
+                // Until cancelled: an hour is longer than any test.
+                try await Task.sleep(for: .seconds(3600))
+            } catch {
+                state.withLock { $0.cancelled.append(id) }
+                throw error
+            }
+        }
+
+        return RecordingAnalysis(
+            version: RecordingAnalysis.currentVersion,
+            recordingID: id,
+            date: .now,
+            events: [],
+            athletes: [],
+            frames: RecordingAnalysis.FrameCounts(decoded: start.recording.frameTimes.count, unmatched: 0, withPose: 0),
+            duration: 0
+        )
     }
 }

@@ -34,6 +34,19 @@ nonisolated enum DetectorEvent: Equatable, Sendable {
     /// The athletes as one analysed frame showed them. Reported for every
     /// analysed frame, also outside of monitoring; a recording keeps them.
     case athletesTracked(TrackingFrame)
+    
+    /// What the camera the detector watches through did: frames stopping
+    /// or arriving again, the precision rate, the held exposure. Also
+    /// outside of monitoring.
+    case camera(CameraReport)
+
+    /// A movement one frame showed was not confirmed by a second piece of
+    /// evidence, so it was never reported as a `movement`.
+    case movementUnconfirmed(UnconfirmedMovement)
+
+    /// A probed region of the picture changed from one frame to the next.
+    /// Reported for every such step while probing.
+    case probeChanged(ProbeObservation)
 }
 
 protocol MovementDetector: AnyObject {
@@ -61,8 +74,25 @@ protocol MovementDetector: AnyObject {
     func stopMonitoring()
     
     /// The stretch around the gun in which a movement has to be timed as
-    /// precisely as possible. Begins before the gun, so the detector is at
-    /// full speed when it fires. Both calls are safe to repeat.
+    /// precisely as possible. Begins with the hold, so the detector is at
+    /// full speed, and its camera steady, before the gun is armed. Both
+    /// calls are safe to repeat.
     func beginPrecisionWindow()
     func endPrecisionWindow()
+    
+    /// The camera the detector watches through. `.off` for a detector
+    /// without one: a start does not wait for it.
+    var cameraCondition: CameraCondition { get }
+    
+    /// How the camera is set up, for the record of a start. Nil without one.
+    var cameraSetup: CameraSetup? { get }
+    
+    /// What the open precision window has delivered so far. Nil outside
+    /// the window or without a camera.
+    func precisionDelivery() -> PrecisionRateDelivery?
+
+    /// Watches regions of the picture for a step instead of athletes, for
+    /// measuring the app's own timing (probe mode), until `stopMonitoring()`.
+    /// Nobody is judged meanwhile. A detector without a picture reports nothing.
+    func startProbing(_ regions: [ProbeRegion])
 }

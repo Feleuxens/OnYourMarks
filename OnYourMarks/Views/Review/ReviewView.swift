@@ -45,6 +45,10 @@ struct ReviewView: View {
 
                 position
 
+                if let hearing = model.timeline.gunHearing {
+                    GunHearingSummary(hearing: hearing)
+                }
+
                 ReplayScrubber(
                     timeline: model.timeline,
                     progress: model.progress,
@@ -54,11 +58,27 @@ struct ReviewView: View {
 
                 controls
 
+                // A measurement, not a start: its offsets, not reactions.
+                if !model.timeline.probeResults.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Measurement mode")
+                            .font(.headline)
+
+                        ForEach(Array(model.timeline.probeResults.enumerated()), id: \.offset) { index, result in
+                            ProbeResultRow(number: index + 1, result: result)
+                        }
+                    }
+                    .font(.subheadline.monospacedDigit())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if !model.timeline.results.isEmpty {
                     ReactionTimes(
                         results: model.timeline.results,
                         selected: model.highlighted,
-                        onSelect: select
+                        onSelect: select,
+                        analysis: recorder.analysis(of: recording),
+                        isAnalysing: recorder.analysing == recording.id
                     )
                 }
             }
@@ -75,6 +95,7 @@ struct ReviewView: View {
             if let start = model.timeline.gun?.best ?? model.timeline.results.first?.movement.earliest {
                 model.jump(to: start)
             }
+            await recorder.loadAnalysis(of: recording)
         }
         .onDisappear { model.pause() }
         .alert("The start could not be saved.", isPresented: $saveFailed) {

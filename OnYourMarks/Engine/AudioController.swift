@@ -55,6 +55,26 @@ final class AudioController: AudioSessionPlayer {
     private var activeOutputPortIDs: [String] = []
     /// The most recently requested activation or deactivation.
     private var sessionTransition: Task<Void, Never>?
+
+    /// Records while a start's session has microphone input, from the
+    /// preflight until the session is given back.
+    private var listener: MicrophoneRecorder?
+    private var listenerInput: MicrophoneInput?
+
+    /// The latest playbacks and when each was stopped, so that the search
+    /// for a signal ends where it was cut off.
+    private var playbacks: [Playback] = []
+
+    private struct Playback {
+        let signal: Signal
+        /// Nil for a signal played at once.
+        let renderStart: MonotonicTimestamp?
+        var stoppedAt: MonotonicTimestamp?
+    }
+
+    /// Plenty: the engine asks right after the gun, with a recall at most
+    /// in between.
+    private static let rememberedPlaybacks = 8
     
     private let timingDiagnostics = AudioTimingDiagnostics()
     private let clockBridge = AudioHostClockBridge()
@@ -146,7 +166,10 @@ final class AudioController: AudioSessionPlayer {
         guard Signal.allCases.allSatisfy({ buffers[$0] != nil }), let gun = nodes[.go] else {
             throw PreflightError.soundMissing
         }
-        
+
+        // Before the engine is checked: starting the microphone can stop it.
+        let microphone = try await listenForSignals()
+
         guard ensureEngineRunning() else {
             throw PreflightError.engineNotRunning
         }
@@ -169,8 +192,129 @@ final class AudioController: AudioSessionPlayer {
         return AudioPreflight(
             sampleRate: session.sampleRate,
             ioBufferDuration: session.ioBufferDuration,
-            gunTiming: timingBasis(for: .go, on: gun, applyingCalibration: true)
+            gunTiming: timingBasis(for: .go, on: gun, applyingCalibration: true),
+            microphone: microphone
         )
+    }
+
+    /// Starts recording for the start's signals when the session has
+    /// microphone input, and leaves it running until the session is given
+    /// back: stopping the microphone can reconfigure the hardware as well.
+    ///
+    /// Like the calibration, waits for the first audio and lets the hardware
+    /// settle, so a reconfiguration caused by starting the microphone is over
+    /// before the first command. Listening only observes: a microphone that
+    /// doesn't come up leaves the start without it, not failed.
+    private func listenForSignals() async throws -> MicrophoneInput? {
+        guard activeSetup?.needsMicrophone == true else {
+            stopListening()
+            return nil
+        }
+
+        if let listener, listener.isRunning {
+            return listenerInput
+        }
+        stopListening()
+
+        let recorder = MicrophoneRecorder(retention: HearingMath.retention)
+
+        do {
+            try recorder.start()
+            try await waitUntilRecording(recorder)
+        } catch is CancellationError {
+            _ = recorder.stop()
+            throw CancellationError()
+        } catch {
+            _ = recorder.stop()
+            logger.error("Not listening for the gun: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
+        listener = recorder
+        listenerInput = MicrophoneInput(
+            name: AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "",
+            sampleRate: recorder.sampleRate,
+            inputLatency: recorder.inputLatency
+        )
+        return listenerInput
+    }
+
+    private func stopListening() {
+        _ = listener?.stop()
+        listener = nil
+        listenerInput = nil
+    }
+
+    /// Returns once the recorder delivers audio, i.e. the hardware has
+    /// finished reconfiguring for recording, and a while after that.
+    private func waitUntilRecording(_ recorder: MicrophoneRecorder) async throws {
+        let deadline = clock.now().seconds + Self.recorderStartTimeout
+        while !recorder.isReceivingAudio {
+            guard clock.now().seconds < deadline else {
+                throw CalibrationError.recordingFailed("the microphone delivered no audio")
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await Task.sleep(for: .seconds(Self.recorderSettleTime))
+    }
+
+    /// How often a wait for the microphone looks whether it has delivered
+    /// enough: half of one of its chunks (1024 samples at 48 kHz, 21 ms).
+    private static let hearingPollInterval: Duration = .milliseconds(10)
+
+    /// When the microphone heard a scheduled signal, or why it didn't.
+    /// Returns once the recording covers the time the signal can be heard in,
+    /// or once it is clear the microphone won't deliver that.
+    func hear(_ scheduled: ScheduledSignal) async -> SignalHearing {
+        guard let listener else { return .notListening }
+
+        // The built-in speaker is a few centimetres from the microphone;
+        // how far any other output is, nothing says.
+        let travel = scheduled.basis.route?.isBuiltInSpeaker == true ? HeardSignal.builtInSpeakerTravel : nil
+        let latency = listener.inputLatency
+        let giveUp = scheduled.audibleOnset.latest.seconds + HearingMath.searchAfterModel + HearingMath.deliveryAllowance
+
+        // A stop while this waits, e.g. for a recall, shortens the search.
+        var window = hearingWindow(for: scheduled)
+
+        while let search = window.search,
+              (listener.coveredUntil ?? -.infinity) < search.upperBound + latency,
+              clock.now().seconds < giveUp {
+            do {
+                try await Task.sleep(for: Self.hearingPollInterval)
+            } catch {
+                break
+            }
+
+            guard self.listener === listener else { return .notListening }
+            window = hearingWindow(for: scheduled)
+        }
+
+        return await Self.search(
+            listener.recorded,
+            window: window,
+            inputLatency: latency,
+            modelled: scheduled.audibleOnset,
+            travel: travel
+        )
+    }
+
+    private func hearingWindow(for scheduled: ScheduledSignal) -> HearingWindow {
+        let playback = playbacks.last { $0.signal == scheduled.signal && $0.renderStart == scheduled.renderStart }
+        return HearingMath.window(for: scheduled, interruptedAt: playback?.stoppedAt)
+    }
+
+    /// Seconds of samples take a few milliseconds to go through; not on the
+    /// main actor, which runs the start.
+    @concurrent
+    private nonisolated static func search(
+        _ chunks: [RecordedChunk],
+        window: HearingWindow,
+        inputLatency: TimeInterval,
+        modelled: TimeEstimate?,
+        travel: DurationEstimate?
+    ) async -> SignalHearing {
+        HearingMath.hear(in: chunks, window: window, inputLatency: inputLatency, modelled: modelled, travel: travel)
     }
     
     private func activate(_ setup: SessionSetup) async throws {
@@ -267,9 +411,10 @@ final class AudioController: AudioSessionPlayer {
         isSessionActive = false
         activeSetup = nil
         activeOutputPortIDs = []
-        
+
         stop()
         engine.stop()
+        stopListening()
     }
     
     private func startEngineIfNeeded() throws {
@@ -352,18 +497,33 @@ final class AudioController: AudioSessionPlayer {
             return false
         }
         
+        markStopped(signal)
         node.stop()
         node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
-        
+
         do {
             try node.playAudio()
         } catch {
             logger.error("Could not play \(String(describing: signal), privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
         }
-        
+
         soundEndsAt = clock.now().seconds + buffer.durationSeconds + node.outputPresentationLatency
+        remember(Playback(signal: signal, renderStart: nil))
         return true
+    }
+
+    private func markStopped(_ signal: Signal) {
+        let now = clock.now()
+
+        for index in playbacks.indices where playbacks[index].signal == signal && playbacks[index].stoppedAt == nil {
+            playbacks[index].stoppedAt = now
+        }
+    }
+
+    private func remember(_ playback: Playback) {
+        playbacks.append(playback)
+        playbacks.removeFirst(max(0, playbacks.count - Self.rememberedPlaybacks))
     }
     
     /// Starts the signal on the audio clock at the given host time, or as soon
@@ -394,17 +554,19 @@ final class AudioController: AudioSessionPlayer {
         let earliest = MonotonicTimestamp(seconds: clock.now().seconds + lead)
         let renderStart = max(requested, earliest)
         
+        markStopped(signal)
         node.stop()
         node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
-        
+
         do {
             try node.playAudio(at: clockBridge.audioTime(for: renderStart))
         } catch {
             logger.error("Could not schedule \(String(describing: signal), privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
-        
+
         soundEndsAt = renderStart.seconds + buffer.durationSeconds + node.outputPresentationLatency
+        remember(Playback(signal: signal, renderStart: renderStart))
 
         return scheduledSignal(signal, on: node, renderStart: renderStart, applyingCalibration: applyingCalibration)
     }
@@ -506,10 +668,6 @@ final class AudioController: AudioSessionPlayer {
     /// Covers the delay of a slow wireless output without reaching the next click.
     private static let clickSearchDuration: TimeInterval = 0.5
     
-    /// Background noise is measured in this stretch before a click renders,
-    /// relative to its render start.
-    private static let noiseWindow: ClosedRange<TimeInterval> = -0.15 ... -0.02
-    
     /// Plays the gun several times on the current output, records it with the
     /// built-in microphone and compares when it was heard with the prediction.
     ///
@@ -531,7 +689,10 @@ final class AudioController: AudioSessionPlayer {
         guard let route = currentOutput() else {
             throw CalibrationError.recordingFailed("no output")
         }
-        
+
+        // A start's listener may still be running on the same setup.
+        stopListening()
+
         let recorder = MicrophoneRecorder()
         
         do {
@@ -545,14 +706,7 @@ final class AudioController: AudioSessionPlayer {
         var clicks: [ScheduledSignal] = []
         
         do {
-            let deadline = clock.now().seconds + Self.recorderStartTimeout
-            while !recorder.isReceivingAudio {
-                guard clock.now().seconds < deadline else {
-                    throw CalibrationError.recordingFailed("the microphone delivered no audio")
-                }
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            try await Task.sleep(for: .seconds(Self.recorderSettleTime))
+            try await waitUntilRecording(recorder)
 
             for index in 0..<(CalibrationMath.warmUpClicks + CalibrationMath.clickCount) {
                 guard ensureEngineRunning() else {
@@ -589,7 +743,7 @@ final class AudioController: AudioSessionPlayer {
             guard let heard = CalibrationMath.onset(
                 in: recording,
                 window: render...(predicted + Self.clickSearchDuration),
-                noiseWindow: (render + Self.noiseWindow.lowerBound)...(render + Self.noiseWindow.upperBound)
+                noiseWindow: (render + HearingMath.noiseWindow.lowerBound)...(render + HearingMath.noiseWindow.upperBound)
             ) else { return nil }
             
             return heard - recorder.inputLatency - predicted
@@ -617,7 +771,8 @@ final class AudioController: AudioSessionPlayer {
     }
     
     func stop() {
-        for node in nodes.values {
+        for (signal, node) in nodes {
+            markStopped(signal)
             node.stop()
         }
         soundEndsAt = nil
@@ -791,10 +946,14 @@ protocol SignalPlayer {
     func duration(of signal: Signal) -> TimeInterval
     
     func logTimingDiagnostics(label: String)
-    
+
     /// Makes everything ready for a start and reports the output's timing.
     /// Silent; may take a moment, e.g. while a Bluetooth output wakes up.
     func prepareForStart() async throws -> AudioPreflight
+
+    /// When the microphone heard a scheduled signal, or why it didn't. Only
+    /// observes; returns once the recording covers the signal.
+    func hear(_ scheduled: ScheduledSignal) async -> SignalHearing
 }
 
 /// A signal player that also owns the audio session, as the view model needs it.

@@ -479,6 +479,20 @@ struct StarterViewModelTests {
         #expect(vm.uncalibratedWirelessOutput == nil)
     }
     
+    /// A calibration measures the delay once; a wireless output stays less
+    /// accurate than a wired one, so it is still pointed out.
+    @Test
+    func calibratedWirelessOutputIsStillPointedOut() async {
+        let player = FakeSessionPlayer()
+        player.calibrationResult = .fake(routeID: "headphones")
+        let vm = makeViewModel(player: player)
+        
+        vm.calibrateOutput()
+        await waitUntil { !vm.isCalibrating }
+        
+        #expect(vm.wirelessOutput?.id == "headphones")
+    }
+    
     @Test
     func noWarningWhenForcingSpeaker() {
         let player = FakeSessionPlayer()
@@ -487,6 +501,7 @@ struct StarterViewModelTests {
         vm.config.audioOutput = .iPhoneSpeaker
         
         #expect(vm.uncalibratedWirelessOutput == nil)
+        #expect(vm.wirelessOutput == nil)
     }
     
     @Test

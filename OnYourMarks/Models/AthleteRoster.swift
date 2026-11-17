@@ -55,16 +55,28 @@ nonisolated struct MovementObservation: Equatable, Sendable {
     /// How well the athlete was tracked in that frame, if the detector knows.
     let quality: TrackingQuality?
 
+    /// Capture time of the frame whose evidence confirmed the movement. It
+    /// is reported from then on, but timed from `time` and `onset`: the
+    /// wait for confirmation doesn't move the movement.
+    let confirmedAt: MonotonicTimestamp
+
     init(
         time: MonotonicTimestamp,
         onset: TimeEstimate? = nil,
         athleteID: AthleteID? = nil,
-        quality: TrackingQuality? = nil
+        quality: TrackingQuality? = nil,
+        confirmedAt: MonotonicTimestamp? = nil
     ) {
         self.time = time
         self.onset = onset ?? .exact(time)
         self.athleteID = athleteID
         self.quality = quality
+        self.confirmedAt = confirmedAt ?? time
+    }
+
+    /// The same movement, confirmed by a later frame.
+    func confirmed(at time: MonotonicTimestamp) -> MovementObservation {
+        MovementObservation(time: self.time, onset: onset, athleteID: athleteID, quality: quality, confirmedAt: time)
     }
 }
 

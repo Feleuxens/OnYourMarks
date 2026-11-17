@@ -41,6 +41,11 @@ nonisolated struct FrameStatistics: Equatable, Sendable {
     /// The longest time between two delivered frames.
     private(set) var longestGap: TimeInterval = 0
 
+    /// The exposure times and ISO values of the frames that said, from
+    /// their metadata: what was in effect, not what was asked for.
+    private(set) var exposureDurations: ClosedRange<Double>?
+    private(set) var isoValues: ClosedRange<Double>?
+
     var dropped: Int {
         droppedLate + droppedOutOfBuffers + droppedDiscontinuity + droppedUnknown
     }
@@ -53,7 +58,7 @@ nonisolated struct FrameStatistics: Equatable, Sendable {
         return Double(delivered - 1) / (lastTimestamp - firstTimestamp)
     }
 
-    mutating func recordDelivered(at timestamp: TimeInterval) {
+    mutating func recordDelivered(at timestamp: TimeInterval, exposure: TimeInterval? = nil, iso: Double? = nil) {
         if let lastTimestamp {
             longestGap = max(longestGap, timestamp - lastTimestamp)
         } else {
@@ -62,6 +67,18 @@ nonisolated struct FrameStatistics: Equatable, Sendable {
 
         lastTimestamp = timestamp
         delivered += 1
+
+        if let exposure {
+            exposureDurations = Self.widen(exposureDurations, by: exposure)
+        }
+        if let iso {
+            isoValues = Self.widen(isoValues, by: iso)
+        }
+    }
+
+    private static func widen(_ range: ClosedRange<Double>?, by value: Double) -> ClosedRange<Double> {
+        guard let range else { return value...value }
+        return min(range.lowerBound, value)...max(range.upperBound, value)
     }
 
     mutating func recordDropped(_ reason: FrameDropReason) {

@@ -22,6 +22,12 @@ nonisolated struct RecordingStore: Sendable {
     static let recordFileName = "start.json"
     static let trackingFileName = "tracking.json"
     static let motionFileName = "motion.json"
+    /// The second pass over the video (`RecordingAnalysis`), written after
+    /// the start beside its record.
+    static let analysisFileName = "analysis.json"
+    /// What a person found in the video (`RecordedTruth`); only ever put
+    /// there by hand.
+    static let truthFileName = "truth.json"
 
     private let temporaryDirectory: URL
     private let libraryDirectory: URL
@@ -44,7 +50,7 @@ nonisolated struct RecordingStore: Sendable {
 
     /// The files of a recording, for handing them to another app.
     func files(of id: UUID, in location: Location) -> [URL] {
-        [Self.videoFileName, Self.recordFileName, Self.trackingFileName, Self.motionFileName]
+        [Self.videoFileName, Self.recordFileName, Self.trackingFileName, Self.motionFileName, Self.analysisFileName]
             .map { directory(of: id, in: location).appending(path: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
@@ -106,6 +112,32 @@ nonisolated struct RecordingStore: Sendable {
 
         guard FileManager.default.fileExists(atPath: file.path) else { return [] }
         return try JSONDecoder().decode([MotionRecord].self, from: Data(contentsOf: file))
+    }
+
+    /// Stores the second pass beside the recording, wherever it is now.
+    /// False if the recording is gone.
+    @discardableResult
+    func write(_ analysis: RecordingAnalysis, in location: Location) throws -> Bool {
+        let directory = directory(of: analysis.recordingID, in: location)
+
+        guard FileManager.default.fileExists(atPath: directory.appending(path: Self.recordFileName).path) else {
+            return false
+        }
+
+        try JSONEncoder().encode(analysis).write(to: directory.appending(path: Self.analysisFileName), options: .atomic)
+        return true
+    }
+
+    /// Nil for a recording that has none, or one of another version.
+    func analysis(of id: UUID, in location: Location) -> RecordingAnalysis? {
+        let file = directory(of: id, in: location).appending(path: Self.analysisFileName)
+
+        guard let data = try? Data(contentsOf: file),
+              let analysis = try? JSONDecoder().decode(RecordingAnalysis.self, from: data),
+              analysis.version == RecordingAnalysis.currentVersion else {
+            return nil
+        }
+        return analysis
     }
 
     /// Removes every temporary recording but the given ones.

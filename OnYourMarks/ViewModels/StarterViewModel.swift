@@ -61,16 +61,22 @@ class StarterViewModel {
         calibrationTask != nil
     }
     
-    /// A wireless output the next start would play on without a calibration.
-    /// Its latency is only an estimate, so reaction times will be imprecise.
-    var uncalibratedWirelessOutput: OutputRoute? {
+    /// A wireless output the next start would play on. Its delay changes
+    /// while it plays, so even a calibrated one is less accurate than a
+    /// wired output; Bluetooth is supported as best effort only.
+    var wirelessOutput: OutputRoute? {
         guard config.audioOutput == .automatic,
               let output = currentOutput,
-              output.isWireless,
-              calibrations[output.id] == nil else {
+              output.isWireless else {
             return nil
         }
         return output
+    }
+    
+    /// A wireless output the next start would play on without a calibration.
+    /// Its latency is only an estimate, so reaction times will be imprecise.
+    var uncalibratedWirelessOutput: OutputRoute? {
+        wirelessOutput.flatMap { calibrations[$0.id] == nil ? $0 : nil }
     }
     
     /// The built-in speaker reports its own hardware latency, so only
@@ -108,6 +114,18 @@ class StarterViewModel {
     /// in the order of their numbers; a movement without an athlete last.
     var reactions: [AthleteStartResult] {
         engine.athleteResults.sorted { ($0.position ?? .max) < ($1.position ?? .max) }
+    }
+    
+    /// What the camera's precision window delivered in the last start, if
+    /// it fell short of the rate asked for.
+    var precisionShortfall: PrecisionRateDelivery? {
+        isRunning ? nil : lastSession?.precisionShortfall
+    }
+    
+    /// Whether the camera failed after the gun of the last start, so that
+    /// athletes who moved later have no time.
+    var cameraFailedAfterTheGun: Bool {
+        !isRunning && lastSession?.cameraFailedAfterTheGun == true
     }
     
     /// The recording of the start whose results are on screen, once its
@@ -171,8 +189,27 @@ class StarterViewModel {
     }
     
     func start() {
+        run(config)
+    }
+
+    /// What the last measurement found, one per region that changed.
+    var probeResults: [ProbeResult] {
+        engine.probeResults
+    }
+
+    /// A measurement of the app's own timing: the usual sequence and gun,
+    /// with the regions watched for a step instead of athletes.
+    func startProbe(regions: [ProbeRegion]) {
+        guard !regions.isEmpty else { return }
+
+        var probe = config
+        probe.probeRegions = regions
+        run(probe)
+    }
+
+    private func run(_ config: StartConfig) {
         guard !isRunning, !isCalibrating else { return }
-        
+
         // Within the resume delay this keeps the session (and the music paused).
         // A deactivation already talking to the system finishes first:
         // the player runs session transitions one after the other.

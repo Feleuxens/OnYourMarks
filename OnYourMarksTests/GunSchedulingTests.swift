@@ -411,34 +411,8 @@ struct GunSchedulingTests {
     
     // MARK: - Precision window
     
-    @Test
-    func precisionWindowBeginsOneSecondBeforeTheGun() async throws {
-        let clock = ManualClock()
-        let (engine, player, detector, config) = makeEngine(holdTime: 1.6, clock: clock)
-        
-        engine.start(config: config)
-        await waitUntil { engine.state == .waitForStart }
-        
-        // Monitoring runs from the start of the hold, the window opens later.
-        #expect(detector.startCount == 1)
-        #expect(!detector.isInPrecisionWindow)
-        
-        await clock.advance(by: 0.59)
-        #expect(!detector.isInPrecisionWindow)
-        
-        await clock.advance(by: 0.02)
-        #expect(detector.isInPrecisionWindow)
-        
-        let began = try #require(detector.precisionBegins.first)
-        let gun = try #require(player.pendingSchedule?.renderStart.seconds)
-        #expect(began == gun - StarterEngine.precisionLead)
-        
-        engine.abort()
-        #expect(!detector.isInPrecisionWindow)
-    }
-    
     @Test(arguments: [StartType.block, .standing])
-    func shortHoldOpensTheWindowDuringTheCommandBefore(startType: StartType) async throws {
+    func precisionWindowBeginsWithTheHold(startType: StartType) async throws {
         let player = FakeSignalPlayer()
         player.commandDuration = 1.2
         let clock = ManualClock()
@@ -447,35 +421,37 @@ struct GunSchedulingTests {
         var config = StartConfig.instant
         config.startType = startType
         config.standingTimeToReady = 0
-        config.blockTimeToStartMin = 0.3
-        config.blockTimeToStartMax = 0.3
-        config.standingTimeToStartMin = 0.3
-        config.standingTimeToStartMax = 0.3
+        config.blockTimeToStartMin = 1.6
+        config.blockTimeToStartMax = 1.6
+        config.standingTimeToStartMin = 1.6
+        config.standingTimeToStartMax = 1.6
         
-        // The window opens 0.5 s into the last command: its 1.2 s and the
-        // hold's 0.3 s, less the lead.
-        let lastCommandBegins = startType == .block ? 1.2 : 0
+        let lastCommandEnds = startType == .block ? 2.4 : 1.2
         
         engine.start(config: config)
-        await clock.advance(by: lastCommandBegins + 0.49)
+        await clock.advance(by: lastCommandEnds - 0.01)
+        
+        // Not during the last command, however short the hold.
+        #expect(engine.state == (startType == .block ? .set : .onYourMarks))
         #expect(!detector.isInPrecisionWindow)
         
+        // The commands' ends are sums of their durations, which need not
+        // add up to exactly 2.4.
         await clock.advance(by: 0.02)
-        #expect(detector.isInPrecisionWindow)
-        
-        // Still in the last command: the hold alone is shorter than the lead.
-        #expect(engine.state == (startType == .block ? .set : .onYourMarks))
-        #expect(detector.startCount == 0)
-        
-        await clock.advance(by: 0.7)
         #expect(engine.state == .waitForStart)
-        
+        #expect(detector.isInPrecisionWindow)
+        #expect(detector.startCount == 1)
+
+        // Opened when the hold began; the hold counts from there.
         let began = try #require(detector.precisionBegins.first)
+        let holdBegan = try #require(event(.stateChanged(.waitForStart), in: engine)?.time.best.seconds)
         let gun = try #require(player.pendingSchedule?.renderStart.seconds)
-        #expect(began == gun - StarterEngine.precisionLead)
+        #expect(began == holdBegan)
+        #expect(gun == began + 1.6)
         #expect(detector.precisionBegins.count == 1)
         
         engine.abort()
+        #expect(!detector.isInPrecisionWindow)
     }
     
     @Test

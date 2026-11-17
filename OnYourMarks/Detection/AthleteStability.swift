@@ -27,7 +27,8 @@ nonisolated struct AthleteStability: Sendable {
         case becameStable
         /// Left the resting pose without starting.
         case unsteady
-        /// Moved from the resting pose by the threshold. Reported once.
+        /// Moved from the resting pose by the threshold. Reported once,
+        /// unless the start is withdrawn.
         case started
     }
 
@@ -78,6 +79,21 @@ nonisolated struct AthleteStability: Sendable {
     /// Forgets the resting pose; the athlete has to become still again.
     mutating func resettle() {
         self = AthleteStability(profile: profile)
+    }
+
+    /// How far a pose is from the resting pose, measured as for a start;
+    /// nil before the athlete is stable. After `.started` this is what tells
+    /// whether a later frame agrees.
+    func movement(of joints: Joints, aspectRatio: CGFloat = 1) -> CGFloat? {
+        reference.map { Self.movement(of: joints, from: $0, weights: profile.regionWeights, aspectRatio: aspectRatio) }
+    }
+
+    /// Takes back a start that nothing confirmed. The athlete is watched as
+    /// before it, and the frame that crossed counts for nothing: it was left
+    /// out of the recent frames and of the time outside the tolerance.
+    mutating func withdrawStart() {
+        hasStarted = false
+        onset = nil
     }
 
     mutating func process(

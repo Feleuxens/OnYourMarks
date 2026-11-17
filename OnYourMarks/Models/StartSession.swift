@@ -25,6 +25,9 @@ nonisolated enum MeasurementSource: Equatable, Hashable, Codable, Sendable {
     case remoteSignal(UUID)
     
     case externalSensor(String)
+
+    /// The second pass over a recorded start's video, after the start.
+    case recordedVideo
 }
 
 nonisolated enum StartSessionOutcome: Equatable, Codable, Sendable {
@@ -73,7 +76,15 @@ nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     /// The gun started off its schedule; the event time is the gun's time
     /// from here on, wide enough for the schedule and the measurement.
     case gunTimeRevised
-    
+
+    /// The microphone heard the gun; the event time is when, with the
+    /// comparison against the model attached. Only observed: reactions are
+    /// still measured against the gun's time.
+    case gunHeard(HeardSignal)
+
+    /// The start listened for the gun, but the microphone did not hear it.
+    case gunNotHeard(SignalNotHeard)
+
     /// The athletes found when monitoring began; only they are judged.
     case rosterEstablished(AthleteRoster)
     
@@ -112,6 +123,39 @@ nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     /// the start went on.
     case recallSkipped
     
+    /// What the camera did: how it was set up, the precision rate and when
+    /// it arrived, the exposure held, frames stopping and arriving again,
+    /// and what the precision window delivered by the end of the run.
+    case camera(CameraReport)
+    
+    /// The second pass over the recorded video found when a movement
+    /// began; the event time is the beginning. Kept beside the session,
+    /// never in it, and never part of a decision.
+    case movementAnalysed(OnsetRefinement)
+
+    /// The reaction that follows from the second pass's beginning.
+    case reactionAnalysed(DurationEstimate)
+
+    /// A second piece of evidence confirmed the athlete's movement; the
+    /// event time is the frame that brought it. The movement itself is
+    /// timed from the frame before, in `movementObserved`.
+    case movementConfirmed
+
+    /// A movement one frame showed was given up for want of a second piece
+    /// of evidence; the event time is when it would have begun. Not judged.
+    case movementUnconfirmed(UnconfirmedMovement)
+
+    /// A measurement, not a start: these regions of the picture are watched
+    /// for a step instead of athletes (probe mode).
+    case probingStarted([ProbeRegion])
+
+    /// A probed region changed; the event time is the change.
+    case probeChanged(ProbeObservation)
+
+    /// A probed region's change nearest to the gun, measured against the
+    /// gun's heard time as it stood when the run ended.
+    case probeMeasured(ProbeResult)
+
     case sessionEnded(StartSessionOutcome)
 }
 

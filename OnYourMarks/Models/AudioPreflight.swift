@@ -14,10 +14,23 @@ nonisolated struct AudioPreflight: Equatable, Codable, Sendable {
     /// How the gun's render time will map to the moment it is heard.
     let gunTiming: SignalTimingBasis
 
+    /// The microphone the start listens for its gun with. Nil when the
+    /// session records nothing, and in starts recorded before there was one.
+    var microphone: MicrophoneInput?
+
     /// A wireless output's latency is only an estimate until it is calibrated.
     var isCalibrationMissing: Bool {
         gunTiming.isCalibrationMissing
     }
+}
+
+/// The microphone a start listens with.
+nonisolated struct MicrophoneInput: Equatable, Codable, Sendable {
+    let name: String
+    let sampleRate: Double
+
+    /// Taken out of every sample's timestamp, as the system reports it.
+    let inputLatency: TimeInterval
 }
 
 nonisolated enum PreflightError: LocalizedError, Equatable {

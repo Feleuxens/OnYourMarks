@@ -94,6 +94,27 @@ nonisolated struct DecisionEngine: Sendable {
         
         return .uncertain
     }
+
+    /// Judges a reaction as far as the tracking and the gun's time carry
+    /// it. What the engine decides after the gun, and what a replay of a
+    /// recorded start decides again.
+    ///
+    /// - Parameter renderStart: when the gun's first sample was rendered;
+    ///   nil if no gun was scheduled.
+    func judge(
+        _ reaction: DurationEstimate,
+        movement: TimeEstimate,
+        quality: TrackingQuality?,
+        profile: StartProfile,
+        gunTimeIsTrusted: Bool,
+        renderStart: MonotonicTimestamp?
+    ) -> StartDecision {
+        qualify(
+            qualify(evaluateReaction(reaction, profile: profile), by: quality),
+            gunTimeIsTrusted: gunTimeIsTrusted,
+            movedBeforeRender: renderStart.map { movement.latest < $0 } ?? false
+        )
+    }
 }
 
 

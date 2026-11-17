@@ -510,18 +510,162 @@ struct AthleteMotionMonitorTests {
         let athletes = scene.begin([0.2, 0.6])
         scene.settle([pose(at: 0.2), pose(at: 0.6)])
 
-        // Only the right athlete moves.
+        // Only the right athlete moves; one frame is not enough.
         var update = scene.step([pose(at: 0.2), pose(at: 0.6, shiftedBy: 0.08)])
+        #expect(update.movements.isEmpty)
+        let crossing = scene.now
+
+        // The right one keeps moving, which confirms it; now the left one crosses.
+        update = scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.1)])
         #expect(update.movements.map { $0.athleteID } == [athletes[1].id])
-        #expect(update.movements.first?.time == time(scene.now))
+        #expect(update.movements.first?.time == time(crossing))
+        #expect(update.movements.first?.confirmedAt == time(scene.now))
         #expect(update.movements.first?.quality?.level == .good)
 
-        // The right one keeps moving, now the left one starts as well.
-        update = scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6, shiftedBy: 0.1)])
+        update = scene.step([pose(at: 0.2, shiftedBy: 0.1), pose(at: 0.6, shiftedBy: 0.12)])
         #expect(update.movements.map { $0.athleteID } == [athletes[0].id])
 
-        update = scene.step([pose(at: 0.2, shiftedBy: 0.1), pose(at: 0.6, shiftedBy: 0.12)])
+        update = scene.step([pose(at: 0.2, shiftedBy: 0.12), pose(at: 0.6, shiftedBy: 0.14)])
         #expect(update.movements.isEmpty)
+    }
+
+    /// One wrong pose from pose detection must not recall a start: the
+    /// next pose of the athlete has to agree.
+    @Test
+    func aSinglePoseOverTheThresholdIsNotAMovement() {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        let glitch = scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        let crossing = scene.now
+        #expect(glitch.movements.isEmpty)
+
+        let back = scene.step([pose(at: 0.3)])
+        #expect(back.movements.isEmpty)
+        #expect(back.unconfirmed.map { $0.reason } == [.contradicted])
+        #expect(back.unconfirmed.first?.athleteID == id)
+        #expect(back.unconfirmed.first?.time == time(crossing))
+
+        // The athlete is watched on as before: still ready, and a real
+        // start afterwards is found and confirmed.
+        #expect(scene.monitor.isReady)
+        #expect(scene.step([pose(at: 0.3)]).isEmpty)
+
+        let lastStill = scene.now
+        #expect(scene.step([pose(at: 0.3, shiftedBy: 0.08)]).movements.isEmpty)
+        let start = scene.step([pose(at: 0.3, shiftedBy: 0.1)]).movements
+
+        #expect(start.map { $0.athleteID } == [id])
+        #expect(start.first?.onset.earliest == time(lastStill))
+        #expect(start.first?.onset.latest == time(lastStill + frame))
+    }
+
+    /// Pose detection misses a moving athlete now and then: the next pose
+    /// that shows the athlete is the one that has to agree.
+    @Test
+    func aMissedPoseOnlyDelaysTheConfirmation() throws {
+        var scene = Scene()
+        _ = scene.begin([0.3])
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        let crossing = scene.now
+
+        #expect(scene.step([]).isEmpty)
+        #expect(scene.step([]).isEmpty)
+
+        let movement = try #require(scene.step([pose(at: 0.3, shiftedBy: 0.1)]).movements.first)
+        #expect(movement.time == time(crossing))
+        #expect(movement.confirmedAt == time(scene.now))
+    }
+
+    @Test
+    func aCrossingWithoutASecondPoseInTimeIsGivenUp() {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        let crossing = scene.now
+
+        var unconfirmed: [UnconfirmedMovement] = []
+        var frames = 0
+        while unconfirmed.isEmpty, frames < 100 {
+            unconfirmed += scene.step([]).unconfirmed
+            frames += 1
+        }
+
+        #expect(unconfirmed.map { $0.reason } == [.notSeenAgain])
+        #expect(unconfirmed.first?.athleteID == id)
+        // Given up with the first frame after the wait.
+        #expect(scene.now - crossing > AthleteMotionMonitor.confirmationWait)
+        #expect(scene.now - crossing <= AthleteMotionMonitor.confirmationWait + frame)
+
+        // Back where they were: nothing to report, and a start afterwards
+        // needs two poses again.
+        #expect(scene.step([pose(at: 0.3)]).movements.isEmpty)
+        #expect(scene.step([pose(at: 0.3, shiftedBy: 0.08)]).movements.isEmpty)
+        #expect(scene.step([pose(at: 0.3, shiftedBy: 0.1)]).movements.map { $0.athleteID } == [id])
+    }
+
+    @Test
+    func aCrossingStillWaitingWhenMonitoringEndsIsReported() {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+
+        let ended = scene.monitor.end()
+        #expect(ended.unconfirmed.map { $0.reason } == [.monitoringEnded])
+        #expect(ended.unconfirmed.first?.athleteID == id)
+    }
+
+    @Test
+    func aCrossingOfAnAthleteMadeToSettleAgainIsReportedWithTheNextFrame() {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        scene.monitor.resettle(id)
+
+        let update = scene.step([pose(at: 0.3, shiftedBy: 0.1)])
+        #expect(update.unconfirmed.map { $0.reason } == [.resettled])
+        #expect(update.movements.isEmpty)
+    }
+
+    /// In handheld mode the second pose must also be judged with the
+    /// camera's shift taken out; a frame without a measured shift is no
+    /// evidence either way.
+    @Test
+    func aHandheldCrossingWaitsForAFrameWithAMeasuredShift() throws {
+        var scene = Scene()
+        _ = scene.begin([0.3])
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        #expect(scene.step([pose(at: 0.3, shiftedBy: 0.1)], camera: .unmeasured).movements.isEmpty)
+
+        // The camera moved along with the athlete: measured against the
+        // resting pose, the athlete is back.
+        let shifted = scene.step([pose(at: 0.3, shiftedBy: 0.1)], camera: .measured(CGPoint(x: 0.1, y: 0)))
+        #expect(shifted.movements.isEmpty)
+        #expect(shifted.unconfirmed.map { $0.reason } == [.contradicted])
+    }
+
+    @Test
+    func aLostCameraGivesUpEveryCrossing() {
+        var scene = Scene()
+        _ = scene.begin([0.2, 0.6])
+        scene.settle([pose(at: 0.2), pose(at: 0.6)])
+
+        scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6)])
+        let update = scene.step([pose(at: 0.2, shiftedBy: 0.1), pose(at: 0.6)], camera: .lost)
+
+        #expect(update.movements.isEmpty)
+        #expect(update.unconfirmed.map { $0.reason } == [.notSeenAgain])
     }
 
     @Test
@@ -579,6 +723,7 @@ struct AthleteMotionMonitorTests {
         let update = compensated.step(shaken, camera: .measured(CGPoint(x: 0.08, y: 0)))
         #expect(update.movements.isEmpty)
 
+        #expect(scene.step(shaken).movements.isEmpty)
         #expect(scene.step(shaken).movements.count == 2)
     }
 
@@ -639,8 +784,11 @@ struct AthleteMotionMonitorTests {
         let update = scene.step([pose(at: 0.2, shiftedBy: 0.08)])
 
         #expect(update.trackingChanges == [AthleteTrackingChange(athleteID: id, state: .tracked, time: time(scene.now))])
-        #expect(update.movements.map { $0.athleteID } == [id])
-        #expect(update.movements.first?.quality?.level == .poor)
+        #expect(update.movements.isEmpty)
+
+        let confirmed = scene.step([pose(at: 0.2, shiftedBy: 0.08)])
+        #expect(confirmed.movements.map { $0.athleteID } == [id])
+        #expect(confirmed.movements.first?.quality?.level == .poor)
     }
 
     @Test
@@ -670,6 +818,7 @@ struct AthleteMotionMonitorTests {
         #expect(scene.monitor.regions.count == 2)
 
         let lastStill = scene.now
+        scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6)])
         let movement = try #require(scene.step([pose(at: 0.2, shiftedBy: 0.08), pose(at: 0.6)]).movements.first)
 
         #expect(movement.onset.earliest == time(lastStill))

@@ -4,12 +4,32 @@
     "" : {
 
     },
-    "%@ isn't calibrated, so false-start detection will be inaccurate. Calibrate it in Settings." : {
+    "%@ is wireless and isn't calibrated, so false-start detection will be inaccurate. Use the iPhone speaker or a wired speaker, or calibrate it in Settings." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ ist nicht kalibriert, daher wird die Fehlstarterkennung ungenau. Kalibriere die Ausgabe in den Einstellungen."
+            "value" : "%@ ist kabellos und nicht kalibriert, deshalb wird die Fehlstarterkennung ungenau. Nutze den iPhone-Lautsprecher oder einen Lautsprecher mit Kabel, oder kalibriere die Ausgabe in den Einstellungen."
+          }
+        }
+      }
+    },
+    "%@ is wireless. Its delay can change while it plays, so reaction times are less accurate. Use the iPhone speaker or a wired speaker for accurate results." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ist kabellos. Die Verzögerung kann sich während der Wiedergabe ändern, deshalb sind die Reaktionszeiten ungenauer. Nutze für genaue Ergebnisse den iPhone-Lautsprecher oder einen Lautsprecher mit Kabel."
+          }
+        }
+      }
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@"
           }
         }
       }
@@ -84,6 +104,26 @@
         }
       }
     },
+    "Analysing the video…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video wird ausgewertet …"
+          }
+        }
+      }
+    },
+    "Assumptions violated" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annahmen verletzt"
+          }
+        }
+      }
+    },
     "Audio output" : {
       "localizations" : {
         "de" : {
@@ -114,12 +154,32 @@
         }
       }
     },
+    "between %@ and %@ ms" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "zwischen %1$@ und %2$@ ms"
+          }
+        }
+      }
+    },
     "Block" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Block"
+          }
+        }
+      }
+    },
+    "Bluetooth and other wireless outputs delay the sound by an amount that can change while they play. A calibration measures it once, so reaction times stay less accurate than on the iPhone speaker or a wired speaker. Calibration plays the start signal six times and listens with the microphone: turn the volume up and hold the speaker next to the iPhone, in a quiet room." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth und andere kabellose Ausgaben verzögern den Ton um eine Zeit, die sich während der Wiedergabe ändern kann. Eine Kalibrierung misst sie einmal, deshalb bleiben die Reaktionszeiten ungenauer als mit dem iPhone-Lautsprecher oder einem Lautsprecher mit Kabel. Die Kalibrierung spielt das Startsignal sechsmal ab und hört mit dem Mikrofon zu: Stell die Lautstärke hoch und halte den Lautsprecher in einem ruhigen Raum direkt neben das iPhone."
           }
         }
       }
@@ -214,6 +274,66 @@
         }
       }
     },
+    "Clear" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leeren"
+          }
+        }
+      }
+    },
+    "Clock not trusted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uhr nicht vertrauenswürdig"
+          }
+        }
+      }
+    },
+    "Clock restarts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neustarts der Uhr"
+          }
+        }
+      }
+    },
+    "Code" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Code"
+          }
+        }
+      }
+    },
+    "Connect to other phones" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mit anderen Handys verbinden"
+          }
+        }
+      }
+    },
+    "Controller" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steuerung"
+          }
+        }
+      }
+    },
     "Current output" : {
       "localizations" : {
         "de" : {
@@ -264,12 +384,32 @@
         }
       }
     },
+    "Diagnostics" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnose"
+          }
+        }
+      }
+    },
     "Enable camera access in Settings to use false-start detection." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erlaube den Kamerazugriff in den Einstellungen, um Fehlstarts zu erkennen."
+          }
+        }
+      }
+    },
+    "Exchanges (sent, lost)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleiche (gesendet, verloren)"
           }
         }
       }
@@ -334,6 +474,36 @@
         }
       }
     },
+    "From the video: %lld ms ± %lld ms" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus dem Video: %lld ms ± %lld ms"
+          }
+        }
+      }
+    },
+    "From the video: before the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus dem Video: vor dem Schuss"
+          }
+        }
+      }
+    },
+    "From the video: not found" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus dem Video: nicht gefunden"
+          }
+        }
+      }
+    },
     "Go to the gun" : {
       "localizations" : {
         "de" : {
@@ -374,6 +544,16 @@
         }
       }
     },
+    "Kernel lead" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorsprung des Kernels"
+          }
+        }
+      }
+    },
     "Last start" : {
       "localizations" : {
         "de" : {
@@ -404,12 +584,132 @@
         }
       }
     },
+    "Measured" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gemessen"
+          }
+        }
+      }
+    },
+    "Measurement mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messmodus"
+          }
+        }
+      }
+    },
+    "Measures the app's own timing against a light that switches when it hears the gun. Not a start." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Misst die Zeiten der App gegen ein Licht, das schaltet, wenn es den Schuss hört. Kein Start."
+          }
+        }
+      }
+    },
+    "Microphone: gun heard %@ ms after the model; the speaker is %@ m away or the model is off." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Schuss %1$@ ms nach dem Modell gehört; der Lautsprecher ist %2$@ m entfernt oder das Modell weicht ab."
+          }
+        }
+      }
+    },
+    "Microphone: gun heard %@ ms from the model, outside its range." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Schuss mit %@ ms Abweichung vom Modell gehört, außerhalb seiner Spanne."
+          }
+        }
+      }
+    },
+    "Microphone: gun heard %@ ms from the model, within its range." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Schuss mit %@ ms Abweichung vom Modell gehört, innerhalb seiner Spanne."
+          }
+        }
+      }
+    },
+    "Microphone: gun heard." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Schuss gehört."
+          }
+        }
+      }
+    },
+    "Microphone: no recording of the gun." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: keine Aufnahme vom Schuss."
+          }
+        }
+      }
+    },
+    "Microphone: the gun did not stand out from the noise." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Der Schuss hob sich nicht vom Lärm ab."
+          }
+        }
+      }
+    },
+    "Microphone: the gun was stopped before it could be heard." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mikrofon: Der Schuss wurde gestoppt, bevor er zu hören war."
+          }
+        }
+      }
+    },
     "Min time until Start" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Min. Zeit bis Start"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "Nearby phones" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Handys in der Nähe"
           }
         }
       }
@@ -440,6 +740,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kein Schuss"
+          }
+        }
+      }
+    },
+    "No other phones found. They need this screen open with Connect switched on." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine anderen Handys gefunden. Auf ihnen muss dieser Bildschirm offen und „Verbinden“ eingeschaltet sein."
+          }
+        }
+      }
+    },
+    "No paired phones." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine gekoppelten Handys."
           }
         }
       }
@@ -484,6 +804,26 @@
         }
       }
     },
+    "Not reachable" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht erreichbar"
+          }
+        }
+      }
+    },
+    "Offset interval" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versatzintervall"
+          }
+        }
+      }
+    },
     "Ok" : {
       "localizations" : {
         "de" : {
@@ -524,12 +864,52 @@
         }
       }
     },
+    "Pair" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Koppeln"
+          }
+        }
+      }
+    },
+    "Paired phones" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gekoppelte Handys"
+          }
+        }
+      }
+    },
     "Pause" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pause"
+          }
+        }
+      }
+    },
+    "Phones" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Handys"
+          }
+        }
+      }
+    },
+    "Phones with another app version: %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Handys mit einer anderen App-Version: %lld"
           }
         }
       }
@@ -574,12 +954,32 @@
         }
       }
     },
+    "Rate" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gangabweichung"
+          }
+        }
+      }
+    },
     "Reactions measured: %lld" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gemessene Reaktionen: %lld"
+          }
+        }
+      }
+    },
+    "readout position %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausleseposition %@"
           }
         }
       }
@@ -634,6 +1034,26 @@
         }
       }
     },
+    "Region %lld: %@ ms after the gun" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bereich %1$lld: %2$@ ms nach dem Schuss"
+          }
+        }
+      }
+    },
+    "Region %lld: no change seen" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bereich %lld: keine Veränderung gesehen"
+          }
+        }
+      }
+    },
     "Remove calibration" : {
       "localizations" : {
         "de" : {
@@ -660,6 +1080,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Start ansehen"
+          }
+        }
+      }
+    },
+    "Role" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rolle"
+          }
+        }
+      }
+    },
+    "Round trip (last, min, median)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Umlaufzeit (letzte, min., Median)"
           }
         }
       }
@@ -724,6 +1164,16 @@
         }
       }
     },
+    "Speaker" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lautsprecher"
+          }
+        }
+      }
+    },
     "Standing" : {
       "localizations" : {
         "de" : {
@@ -744,6 +1194,16 @@
         }
       }
     },
+    "Start measurement" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messung starten"
+          }
+        }
+      }
+    },
     "Start sequence (block)" : {
       "localizations" : {
         "de" : {
@@ -760,6 +1220,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Startsequenz (Hochstart)"
+          }
+        }
+      }
+    },
+    "Stop measurement" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messung stoppen"
+          }
+        }
+      }
+    },
+    "Synchronized" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgeglichen"
           }
         }
       }
@@ -814,12 +1294,72 @@
         }
       }
     },
+    "The camera delivered %lld of %lld frames per second, so the movement times are less precise." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera hat %lld von %lld Bildern pro Sekunde geliefert, daher sind die Bewegungszeiten ungenauer."
+          }
+        }
+      }
+    },
+    "The camera did not get ready in time, so the start was cancelled." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera war nicht rechtzeitig bereit, daher wurde der Start abgebrochen."
+          }
+        }
+      }
+    },
+    "The camera isn't delivering any pictures, so the start was cancelled." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera liefert keine Bilder, daher wurde der Start abgebrochen."
+          }
+        }
+      }
+    },
+    "The camera stopped after the gun. Athletes without a time could not be judged." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera ist nach dem Schuss ausgefallen. Athleten ohne Zeit konnten nicht bewertet werden."
+          }
+        }
+      }
+    },
+    "The camera stopped during the start, so the start was cancelled." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Kamera ist während des Starts ausgefallen, daher wurde der Start abgebrochen."
+          }
+        }
+      }
+    },
     "The clicks varied by %lld ms. Keep the output still and the room quiet, then try again." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Klicks schwankten um %lld ms. Halte die Ausgabe ruhig, sorge für Stille und versuch es erneut."
+          }
+        }
+      }
+    },
+    "The gun did not fire, so there is nothing to measure against." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Schuss ist nicht gefallen, daher gibt es nichts, wogegen gemessen werden kann."
           }
         }
       }
@@ -880,6 +1420,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der nächste Start ersetzt ihn, wenn du ihn nicht sicherst."
+          }
+        }
+      }
+    },
+    "The other phones show this code next to this phone's name. Paired phones synchronize their clocks ten times a second." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die anderen Handys zeigen diesen Code neben dem Namen dieses Handys. Gekoppelte Handys gleichen ihre Uhren zehnmal pro Sekunde ab."
           }
         }
       }
@@ -964,6 +1514,26 @@
         }
       }
     },
+    "This is a measurement mode, not a start. Draw a rectangle on the picture around a light that switches when it hears the gun. The usual sequence plays, and the app measures when the light changed against the moment it expects the gun to be heard. If the app's times are right, the result is 0 ms." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das ist ein Messmodus, kein Start. Zieh im Bild ein Rechteck um ein Licht, das schaltet, wenn es den Schuss hört. Die gewohnte Abfolge läuft ab, und die App misst, wann sich das Licht verändert hat, gegenüber dem Moment, in dem sie den Schuss hörbar erwartet. Stimmen die Zeiten der App, ist das Ergebnis 0 ms."
+          }
+        }
+      }
+    },
+    "This phone" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Handy"
+          }
+        }
+      }
+    },
     "Time until \"On Your Marks\"" : {
       "localizations" : {
         "de" : {
@@ -984,6 +1554,16 @@
         }
       }
     },
+    "Timing probe" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeitmessung prüfen"
+          }
+        }
+      }
+    },
     "Tripod" : {
       "localizations" : {
         "de" : {
@@ -994,12 +1574,52 @@
         }
       }
     },
+    "Turn on the camera" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamera einschalten"
+          }
+        }
+      }
+    },
     "Unknown" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Unbekannt"
+          }
+        }
+      }
+    },
+    "Unpair" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entkoppeln"
+          }
+        }
+      }
+    },
+    "Waiting for its clock" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warte auf seine Uhr"
+          }
+        }
+      }
+    },
+    "Whole picture" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ganzes Bild"
           }
         }
       }

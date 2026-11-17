@@ -140,6 +140,29 @@ final class OnYourMarksUITests: XCTestCase {
         XCTAssertFalse(startButton.exists)
     }
     
+    /// The probe mode is reached from the settings. Without a camera, as in
+    /// the simulator, a measurement can't start.
+    func testTimingProbeOpensFromTheSettings() {
+        app.buttons["settingsButton"].tap()
+
+        let link = app.buttons["probeLink"]
+        for _ in 0..<5 where !link.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+
+        let wholePicture = app.buttons["probeWholePictureButton"]
+        XCTAssertTrue(wholePicture.waitForExistence(timeout: 5))
+        keepScreenshot()
+
+        wholePicture.tap()
+
+        #if targetEnvironment(simulator)
+        XCTAssertFalse(app.buttons["probeStartButton"].isEnabled)
+        #endif
+    }
+
     /// Kept also when the test passes: the picture is what there is to look at.
     private func keepScreenshot() {
         let attachment = XCTAttachment(screenshot: app.screenshot())

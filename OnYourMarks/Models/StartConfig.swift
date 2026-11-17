@@ -60,6 +60,10 @@ nonisolated struct StartConfig: Codable, Sendable {
     var recordingAfterStart: Double = 3 {
         didSet { recordingAfterStart = recordingAfterStart.clamped(to: Self.recordingAfterStartRange) }
     }
+    /// Regions of the picture watched for a step instead of athletes: a
+    /// measurement of the app's own timing (probe mode). Empty for a start.
+    /// Not stored; a measurement is set up each time.
+    var probeRegions: [ProbeRegion] = []
 
     static let standard = StartConfig()
     

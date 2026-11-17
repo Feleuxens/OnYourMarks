@@ -21,8 +21,17 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
     /// time the reactions were measured against.
     let gun: TimeEstimate?
 
+    /// What the microphone made of the gun, if the start listened for it.
+    let gunHearing: SignalHearing?
+
     let results: [AthleteStartResult]
     let roster: AthleteRoster?
+
+    /// Movements that one pose showed and nothing confirmed; not judged.
+    let unconfirmed: [UnconfirmedMovement]
+
+    /// What a measurement found; empty for a start.
+    let probeResults: [ProbeResult]
 
     /// Ordered by time.
     private let tracking: [TrackingFrame]
@@ -30,8 +39,13 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
     init(recording: StartRecording, tracking: [TrackingFrame]) {
         frameTimes = recording.frameTimes
         gun = Self.gun(in: recording.session)
+        gunHearing = Self.gunHearing(in: recording.session)
         results = recording.results.sorted { ($0.position ?? .max) < ($1.position ?? .max) }
         roster = recording.session.roster
+        unconfirmed = recording.session.events.compactMap { event in
+            if case .movementUnconfirmed(let movement) = event.kind { movement } else { nil }
+        }
+        probeResults = recording.session.probeResults
         self.tracking = tracking.sorted { $0.time < $1.time }
     }
 
@@ -128,6 +142,22 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
             }
         }
         return fired
+    }
+
+    /// The last time the microphone listened for a gun. Only a gun that
+    /// could no longer be taken back is listened for.
+    static func gunHearing(in session: StartSession) -> SignalHearing? {
+        for event in session.events.reversed() {
+            switch event.kind {
+            case .gunHeard(let heard):
+                return .heard(heard)
+            case .gunNotHeard(let reason):
+                return .notHeard(reason)
+            default:
+                continue
+            }
+        }
+        return nil
     }
 }
 

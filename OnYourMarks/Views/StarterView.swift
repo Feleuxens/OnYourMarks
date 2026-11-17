@@ -73,6 +73,14 @@ struct StarterView: View {
                             .padding(.top, 8)
                     }
                     
+                    if vm.precisionShortfall != nil || vm.cameraFailedAfterTheGun {
+                        CameraResultNotice(
+                            shortfall: vm.precisionShortfall,
+                            failedAfterTheGun: vm.cameraFailedAfterTheGun
+                        )
+                        .padding(.top, 8)
+                    }
+                    
                     if let recording = vm.reviewableRecording {
                         NavigationLink {
                             ReviewView(recording: recording, recorder: vm.recorder)
@@ -90,8 +98,8 @@ struct StarterView: View {
                     
                     Spacer()
                     
-                    if let output = vm.uncalibratedWirelessOutput {
-                        UncalibratedOutputWarning(outputName: output.name)
+                    if let output = vm.wirelessOutput {
+                        WirelessOutputWarning(outputName: output.name, isCalibrated: vm.uncalibratedWirelessOutput == nil)
                             .padding(.bottom, 8)
                     }
                     
@@ -185,4 +193,5 @@ struct StarterView: View {
 
 #Preview {
     StarterView()
+        .environment(NodeSession())
 }
