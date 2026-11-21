@@ -96,11 +96,15 @@ nonisolated enum HearingMath {
         let recordedSearch = (search.lowerBound + inputLatency) ... (search.upperBound + inputLatency)
         let recordedNoise = (window.noise.lowerBound + inputLatency) ... (window.noise.upperBound + inputLatency)
 
-        guard CalibrationMath.covers(chunks, recordedSearch), CalibrationMath.covers(chunks, recordedNoise) else {
+        guard let covered = CalibrationMath.gaplessCoverage(of: recordedSearch, in: chunks),
+              CalibrationMath.covers(chunks, recordedNoise) else {
             return .notHeard(.noAudio)
         }
 
         guard let onset = CalibrationMath.detectOnset(in: chunks, window: recordedSearch, noiseWindow: recordedNoise) else {
+            // The search only reaches the first gap; behind it the gun may be.
+            guard covered.upperBound >= recordedSearch.upperBound else { return .notHeard(.noAudio) }
+
             return .notHeard(window.isCutOff ? .stoppedBeforeHeard : .nothingAboveNoise)
         }
 

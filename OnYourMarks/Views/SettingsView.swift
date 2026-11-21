@@ -70,16 +70,6 @@ struct SettingsView: View {
                         .accessibilityIdentifier("phonesLink")
                 }
 
-                Section {
-                    NavigationLink("Timing probe") {
-                        ProbeView(vm: vm)
-                    }
-                    .accessibilityIdentifier("probeLink")
-                } header: {
-                    Text("Diagnostics")
-                } footer: {
-                    Text("Measures the app's own timing against a light that switches when it hears the gun. Not a start.")
-                }
 
                 Section {
                     Button("Reset to defaults", role: .destructive) {

@@ -40,7 +40,7 @@ A single frame is not enough: the athlete's next analysed pose has to agree. One
 
 ### When did it begin
 
-Poses say *who* moved. The pixels say *when*: the app samples every frame of each athlete's region and walks back from the confirmed movement to the last frame that still looked like rest. The movement's time is the interval between that frame and the next one, usually two neighbouring frames (8.3 ms apart at 120 fps).
+Poses say *who* moved. The pixels say *when*: the app samples every frame of each athlete's region and walks back from the confirmed movement to the last frame that still looked like rest. The movement's time is the interval between that frame and the next one, usually two neighbouring frames (8.3 ms apart at 120 fps). If the pixels still showed rest when the poses had already moved, they saw something later, such as an arm, and the app keeps the time from the poses.
 
 ### The decision
 
@@ -52,6 +52,8 @@ The reaction time is the interval from the gun to the movement. It is a false st
 | Standing | the gun itself (only a movement certainly before the gun) |
 
 An interval that overlaps the limit is **uncertain**: shown, never recalled. A standing start begins too gradually to judge faster reactions.
+
+A movement right after the gun is judged once the app has checked when the gun really played, 50 ms after it started. If that check fails, the reaction is shown as uncertain and nobody is recalled. A movement before the gun is judged at once.
 
 ### Several athletes
 

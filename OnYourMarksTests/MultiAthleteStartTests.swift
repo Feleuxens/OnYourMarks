@@ -202,6 +202,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.15, athlete: ids[1], quality: good)
@@ -238,6 +239,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.15, athlete: ids[0], quality: good)
@@ -270,6 +272,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.15, athlete: ids[0], quality: good)
@@ -389,6 +392,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.05, athlete: ids[0], quality: poor)
@@ -453,6 +457,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         // Last seen at rest 60 ms after the gun, certainly moving at 120 ms.
@@ -476,6 +481,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: good)
@@ -503,6 +509,29 @@ struct MultiAthleteStartTests {
         #expect(engine.athleteResults.first?.decision == .definiteFalseStart)
     }
     
+    /// Still at rest in the pictures when the poses had certainly moved:
+    /// a later change, not this movement's beginning.
+    @Test
+    func aRefinementThatBeganAfterTheMovementIsIgnored() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+
+        detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: good)
+        detector.emitRefinement(from: gun + 0.131, to: gun + 0.152, athlete: ids[0])
+
+        let result = try #require(engine.athleteResults.first)
+        #expect(result.decision == .uncertain)
+        #expect(!result.isRefined)
+        #expect(!events(engine).contains { if case .movementOnsetRefined = $0.kind { true } else { false } })
+
+        engine.abort()
+    }
+
     @Test
     func aRefinementCanClearAnUncertainStart() async throws {
         let ids = [AthleteID()]
@@ -510,6 +539,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.15, since: gun + 0.08, athlete: ids[0], quality: good)
@@ -538,6 +568,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         // Poses saw the movement after the gun.
@@ -563,6 +594,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.2, since: gun + 0.15, athlete: ids[0], quality: good)
@@ -582,6 +614,7 @@ struct MultiAthleteStartTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         
         detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: poor)

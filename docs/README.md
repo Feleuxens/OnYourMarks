@@ -15,7 +15,6 @@ OnYourMarks plays a sprint start sequence and watches the athletes with the iPho
 - [Recording and review](features/recording-and-review.md): watching a start frame by frame.
 - [Audio output](features/audio-output.md): speakers, Bluetooth and calibration.
 - [Several phones](features/several-phones.md) [Experimental]
-- [Timing probe](features/timing-probe.md) [Diagnostics]
 
 ## Developer
 

@@ -43,10 +43,6 @@ nonisolated enum DetectorEvent: Equatable, Sendable {
     /// A movement one frame showed was not confirmed by a second piece of
     /// evidence, so it was never reported as a `movement`.
     case movementUnconfirmed(UnconfirmedMovement)
-
-    /// A probed region of the picture changed from one frame to the next.
-    /// Reported for every such step while probing.
-    case probeChanged(ProbeObservation)
 }
 
 protocol MovementDetector: AnyObject {
@@ -90,9 +86,4 @@ protocol MovementDetector: AnyObject {
     /// What the open precision window has delivered so far. Nil outside
     /// the window or without a camera.
     func precisionDelivery() -> PrecisionRateDelivery?
-
-    /// Watches regions of the picture for a step instead of athletes, for
-    /// measuring the app's own timing (probe mode), until `stopMonitoring()`.
-    /// Nobody is judged meanwhile. A detector without a picture reports nothing.
-    func startProbing(_ regions: [ProbeRegion])
 }

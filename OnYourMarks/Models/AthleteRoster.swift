@@ -74,9 +74,10 @@ nonisolated struct MovementObservation: Equatable, Sendable {
         self.confirmedAt = confirmedAt ?? time
     }
 
-    /// The same movement, confirmed by a later frame.
-    func confirmed(at time: MonotonicTimestamp) -> MovementObservation {
-        MovementObservation(time: self.time, onset: onset, athleteID: athleteID, quality: quality, confirmedAt: time)
+    /// The same movement, confirmed by a later frame. It keeps the
+    /// crossing's time and is judged by the weaker of the two frames' tracking.
+    func confirmed(at time: MonotonicTimestamp, quality confirming: TrackingQuality?) -> MovementObservation {
+        MovementObservation(time: self.time, onset: onset, athleteID: athleteID, quality: quality.weaker(confirming), confirmedAt: time)
     }
 }
 
@@ -91,6 +92,13 @@ nonisolated struct OnsetRefinement: Equatable, Codable, Sendable {
 
     /// Frames missing between those two; they have widened the interval.
     let droppedFrames: Int
+
+    /// Whether the pictures still showed rest after the poses had certainly
+    /// moved, by `movement`'s late end. Then what they found is a later
+    /// change, an arm or a shadow, not the beginning of this movement.
+    func beganAfter(_ movement: TimeEstimate) -> Bool {
+        onset.earliest > movement.latest
+    }
 }
 
 /// An athlete on the roster was hidden, lost or found again.

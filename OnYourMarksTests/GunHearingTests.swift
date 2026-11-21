@@ -41,10 +41,20 @@ struct HearingMathTests {
         to end: TimeInterval = 100.6,
         soundAt: TimeInterval?,
         noise: Float = 0.001,
-        level: Float = 0.5
+        level: Float = 0.5,
+        quietSound: (from: TimeInterval, to: TimeInterval, level: Float)? = nil
     ) -> [RecordedChunk] {
         let count = Int((end - start) * sampleRate)
         var samples = (0..<count).map { index in noise * (index.isMultiple(of: 2) ? 1 : -1) }
+
+        // Timestamps of the recording, like the chunks'.
+        if let quietSound {
+            let first = Int(((quietSound.from - start) * sampleRate).rounded(.up))
+            let last = Int(((quietSound.to - start) * sampleRate).rounded(.down))
+            for index in first..<last {
+                samples[index] = quietSound.level * (index.isMultiple(of: 2) ? 1 : -1)
+            }
+        }
 
         if let soundAt {
             let first = Int(((soundAt + inputLatency - start) * sampleRate).rounded(.up))
@@ -146,6 +156,44 @@ struct HearingMathTests {
     @Test
     func aRecordingThatEndsBeforeTheGunHasNoAudio() {
         #expect(hear(recording(to: 99.95, soundAt: nil)) == .notHeard(.noAudio))
+    }
+
+    /// The chunk with the attack never arrived: the loud tail after the
+    /// gap is not the onset.
+    @Test
+    func aGapBeforeTheOnsetLeavesNoAudio() {
+        let attack = 100.0365 + inputLatency
+        let chunks = recording(soundAt: 100.0365).filter { !($0.hostSeconds <= attack && $0.end > attack) }
+
+        #expect(hear(chunks) == .notHeard(.noAudio))
+    }
+
+    /// A quiet sound before the gap, at 2 % of the gun after it, is only
+    /// loud against itself: the peak comes from the whole window.
+    @Test
+    func aQuietSoundBeforeAGapIsNotTakenForTheGun() {
+        let attack = 100.0365 + inputLatency
+        let full = recording(soundAt: 100.0365)
+        let missing = full.first { $0.hostSeconds <= attack && $0.end > attack }!
+
+        let chunks = recording(
+            soundAt: 100.0365,
+            quietSound: (missing.hostSeconds - 0.015, missing.hostSeconds, 0.01)
+        ).filter { $0.hostSeconds != missing.hostSeconds }
+
+        #expect(hear(chunks) == .notHeard(.noAudio))
+    }
+
+    @Test
+    func aGapAfterTheOnsetAndItsSustainChangesNothing() throws {
+        let later = 100.0365 + inputLatency + 0.05
+        let chunks = recording(soundAt: 100.0365).filter { !($0.hostSeconds <= later && $0.end > later) }
+
+        guard case .heard(let heard) = hear(chunks) else {
+            Issue.record("not heard")
+            return
+        }
+        #expect(abs(heard.heard.best.seconds - 100.0365) <= 1 / sampleRate)
     }
 
     @Test
@@ -362,6 +410,7 @@ struct GunHearingEngineTests {
 
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         await waitUntil { kinds(engine).contains(.gunHeard(heardGun)) }
 
         let audible = try #require(player.pendingSchedule?.audibleOnset.best)

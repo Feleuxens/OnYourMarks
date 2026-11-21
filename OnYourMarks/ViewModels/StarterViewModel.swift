@@ -192,21 +192,6 @@ class StarterViewModel {
         run(config)
     }
 
-    /// What the last measurement found, one per region that changed.
-    var probeResults: [ProbeResult] {
-        engine.probeResults
-    }
-
-    /// A measurement of the app's own timing: the usual sequence and gun,
-    /// with the regions watched for a step instead of athletes.
-    func startProbe(regions: [ProbeRegion]) {
-        guard !regions.isEmpty else { return }
-
-        var probe = config
-        probe.probeRegions = regions
-        run(probe)
-    }
-
     private func run(_ config: StartConfig) {
         guard !isRunning, !isCalibrating else { return }
 

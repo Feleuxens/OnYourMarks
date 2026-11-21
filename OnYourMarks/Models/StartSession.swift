@@ -145,17 +145,6 @@ nonisolated enum StartEventKind: Equatable, Codable, Sendable {
     /// of evidence; the event time is when it would have begun. Not judged.
     case movementUnconfirmed(UnconfirmedMovement)
 
-    /// A measurement, not a start: these regions of the picture are watched
-    /// for a step instead of athletes (probe mode).
-    case probingStarted([ProbeRegion])
-
-    /// A probed region changed; the event time is the change.
-    case probeChanged(ProbeObservation)
-
-    /// A probed region's change nearest to the gun, measured against the
-    /// gun's heard time as it stood when the run ended.
-    case probeMeasured(ProbeResult)
-
     case sessionEnded(StartSessionOutcome)
 }
 

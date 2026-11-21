@@ -154,16 +154,6 @@
         }
       }
     },
-    "between %@ and %@ ms" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "zwischen %1$@ und %2$@ ms"
-          }
-        }
-      }
-    },
     "Block" : {
       "localizations" : {
         "de" : {
@@ -274,16 +264,6 @@
         }
       }
     },
-    "Clear" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Leeren"
-          }
-        }
-      }
-    },
     "Clock not trusted" : {
       "localizations" : {
         "de" : {
@@ -380,16 +360,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erkennung an"
-          }
-        }
-      }
-    },
-    "Diagnostics" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diagnose"
           }
         }
       }
@@ -580,36 +550,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Max. Zeit bis Start"
-          }
-        }
-      }
-    },
-    "Measured" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gemessen"
-          }
-        }
-      }
-    },
-    "Measurement mode" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Messmodus"
-          }
-        }
-      }
-    },
-    "Measures the app's own timing against a light that switches when it hears the gun. Not a start." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Misst die Zeiten der App gegen ein Licht, das schaltet, wenn es den Schuss hört. Kein Start."
           }
         }
       }
@@ -974,16 +914,6 @@
         }
       }
     },
-    "readout position %@" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ausleseposition %@"
-          }
-        }
-      }
-    },
     "Recall off" : {
       "localizations" : {
         "de" : {
@@ -1030,26 +960,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aufnahme nach dem Start"
-          }
-        }
-      }
-    },
-    "Region %lld: %@ ms after the gun" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bereich %1$lld: %2$@ ms nach dem Schuss"
-          }
-        }
-      }
-    },
-    "Region %lld: no change seen" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bereich %lld: keine Veränderung gesehen"
           }
         }
       }
@@ -1194,16 +1104,6 @@
         }
       }
     },
-    "Start measurement" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Messung starten"
-          }
-        }
-      }
-    },
     "Start sequence (block)" : {
       "localizations" : {
         "de" : {
@@ -1220,16 +1120,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Startsequenz (Hochstart)"
-          }
-        }
-      }
-    },
-    "Stop measurement" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Messung stoppen"
           }
         }
       }
@@ -1350,16 +1240,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Klicks schwankten um %lld ms. Halte die Ausgabe ruhig, sorge für Stille und versuch es erneut."
-          }
-        }
-      }
-    },
-    "The gun did not fire, so there is nothing to measure against." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der Schuss ist nicht gefallen, daher gibt es nichts, wogegen gemessen werden kann."
           }
         }
       }
@@ -1514,16 +1394,6 @@
         }
       }
     },
-    "This is a measurement mode, not a start. Draw a rectangle on the picture around a light that switches when it hears the gun. The usual sequence plays, and the app measures when the light changed against the moment it expects the gun to be heard. If the app's times are right, the result is 0 ms." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Das ist ein Messmodus, kein Start. Zieh im Bild ein Rechteck um ein Licht, das schaltet, wenn es den Schuss hört. Die gewohnte Abfolge läuft ab, und die App misst, wann sich das Licht verändert hat, gegenüber dem Moment, in dem sie den Schuss hörbar erwartet. Stimmen die Zeiten der App, ist das Ergebnis 0 ms."
-          }
-        }
-      }
-    },
     "This phone" : {
       "localizations" : {
         "de" : {
@@ -1554,32 +1424,12 @@
         }
       }
     },
-    "Timing probe" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zeitmessung prüfen"
-          }
-        }
-      }
-    },
     "Tripod" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stativ"
-          }
-        }
-      }
-    },
-    "Turn on the camera" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kamera einschalten"
           }
         }
       }
@@ -1610,16 +1460,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Warte auf seine Uhr"
-          }
-        }
-      }
-    },
-    "Whole picture" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ganzes Bild"
           }
         }
       }

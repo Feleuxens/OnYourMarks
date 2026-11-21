@@ -75,6 +75,11 @@ class FakeSignalPlayer: SignalPlayer {
     func measuredPlayback(of signal: Signal) -> ScheduledSignal? {
         guard measuresPlayback, let pending = pendingSchedule, pending.signal == signal else { return nil }
         
+        // Before its first rendered sample the player has no sample time.
+        if let clock, clock.now() < pending.renderStart {
+            return nil
+        }
+        
         let renderStart = pending.renderStart.seconds + measuredDelay
         
         return ScheduledSignal(
@@ -333,7 +338,8 @@ final class FakeMovementDetector: MovementDetector {
         at time: TimeInterval,
         since: TimeInterval? = nil,
         athlete: AthleteID? = nil,
-        quality: TrackingQuality? = nil
+        quality: TrackingQuality? = nil,
+        confirmedAt: TimeInterval? = nil
     ) {
         let onset = since.map {
             TimeEstimate(
@@ -346,7 +352,11 @@ final class FakeMovementDetector: MovementDetector {
         onEvent?(
             .movement(
                 MovementObservation(
-                    time: MonotonicTimestamp(seconds: time), onset: onset, athleteID: athlete, quality: quality
+                    time: MonotonicTimestamp(seconds: time),
+                    onset: onset,
+                    athleteID: athlete,
+                    quality: quality,
+                    confirmedAt: confirmedAt.map { MonotonicTimestamp(seconds: $0) }
                 )
             )
         )
@@ -375,13 +385,6 @@ final class FakeMovementDetector: MovementDetector {
         )
     }
 
-    /// The regions of each measurement.
-    private(set) var probed: [[ProbeRegion]] = []
-
-    func startProbing(_ regions: [ProbeRegion]) {
-        probed.append(regions)
-    }
-    
     /// Like a detector whose camera is off, the fake has none unless told otherwise.
     private(set) var cameraCondition = CameraCondition.off
     var cameraSetup: CameraSetup? = CameraSetup(width: 1920, height: 1080, requestedFrameRate: 120, expectedFrameRate: 120)
@@ -465,6 +468,17 @@ func waitUntil(
     }
 
     #expect(condition())
+}
+
+/// Waits until the engine has read the committed gun back: a movement that
+/// began after the gun's render start is judged only then.
+@MainActor
+func waitForGunReadBack(_ engine: StarterEngine) async {
+    await waitUntil {
+        (engine.currentSession ?? engine.lastSession)?.events.contains {
+            $0.kind == .gunPlaybackMeasured || $0.kind == .gunPlaybackNotMeasured
+        } == true
+    }
 }
 
 /// The longest one turn of a waiting test counts towards its timeout. A

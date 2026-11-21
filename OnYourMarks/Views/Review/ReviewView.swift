@@ -58,20 +58,6 @@ struct ReviewView: View {
 
                 controls
 
-                // A measurement, not a start: its offsets, not reactions.
-                if !model.timeline.probeResults.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Measurement mode")
-                            .font(.headline)
-
-                        ForEach(Array(model.timeline.probeResults.enumerated()), id: \.offset) { index, result in
-                            ProbeResultRow(number: index + 1, result: result)
-                        }
-                    }
-                    .font(.subheadline.monospacedDigit())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
                 if !model.timeline.results.isEmpty {
                     ReactionTimes(
                         results: model.timeline.results,

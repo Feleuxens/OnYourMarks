@@ -682,4 +682,33 @@ struct CameraStartTests {
         #expect(kinds(engine).contains(.camera(failure)))
         #expect(engine.lastSession?.cameraFailedAfterTheGun == true)
     }
+
+    @Test
+    func aMovementConfirmedOnceTheCameraCameBackIsNotJudged() async throws {
+        let clock = ManualClock()
+        let (engine, player, detector, config) = makeEngine(holdTime: 0, clock: clock)
+
+        let athlete = AthleteID()
+        let quality = TrackingQuality(state: .tracked, jointCoverage: 1, confidence: 0.9, continuity: 1)
+        detector.roster = AthleteRoster(entries: [AthleteRoster.Entry(id: athlete, position: 1, quality: quality)])
+
+        engine.start(config: config)
+        await waitUntil { engine.state == .waitForStart }
+        steady(detector)
+        await waitUntil { engine.state == .start }
+
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+
+        // Crossed before the last frame, confirmed by one after the gap.
+        let failure = CameraReport.failed(.interrupted(reason: 1), lastFrame: MonotonicTimestamp(seconds: gun + 0.03))
+        detector.changeCamera(to: .failed(.interrupted(reason: 1)), reporting: failure)
+        detector.changeCamera(to: .delivering(isSteady: true), reporting: .delivering)
+        detector.emitMovement(at: gun + 0.02, since: gun, athlete: athlete, quality: quality, confirmedAt: gun + 0.08)
+
+        await clock.advance(by: engine.reactionWindow + 0.1)
+
+        #expect(engine.lastSession?.outcome == .completed)
+        #expect(engine.athleteResults.isEmpty)
+        #expect(player.played == [.onYourMarks, .set, .go])
+    }
 }

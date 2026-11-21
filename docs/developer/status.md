@@ -37,11 +37,15 @@ One start tunes nothing. No constant has been changed because of it.
 
 ### Accuracy
 
-- **No ground truth yet.** The timing probe needs a sound-triggered light; exposure time and rolling shutter are not modelled.
+- **No ground truth yet.** Exposure time and rolling shutter are not modelled.
 - `OutputTiming.cancellationLead` is reasoned. `cancellationLeadIsMeasured` measures it; it has only run in the simulator (no sound got out at leads of 22.5 ms or more, current lead 25 ms there).
 - Hearing the gun has only run in the simulator (46 ms after the model, which doesn't know the Mac's latencies). On the device: does it agree with the model as the calibration did?
 - All `MotionProfile` values, the tracker's gate, the quality thresholds, the onset analysis's thresholds and `reactionWindow` (1.5 s) are reasoned. They need recorded starts with several athletes, and hand-labelled `truth.json` files.
 - A pose error that repeats on the next frame can still recall a start.
+- A movement that began after the gun's render start waits for the read-back, 50 ms after the render start, before it can recall. How often a read-back fails, and how often the heard time it gives differs from the schedule while the render is on time, is unmeasured. On the recorded start it gave a heard time 0.27 ms before the schedule (under the 0.5 ms that revises it). The read-back's latency is not stored, so render and latency can't be told apart afterwards.
+- `SecondPass.ambiguousVoteShare` (0.5) is reasoned. It has not met a start with two athletes side by side.
+- A short noise just before the gun can still move the onset the microphone hears, by up to the sustain window (10 ms): the sustain check takes the mean, and the gun's energy carries a spike before it. Live this only changes the recorded check; a calibration click is affected, though the median and the spread check limit it. Left open (owner, 2026-11-18).
+- `CalibrationMath.maximumChunkGap` (1 ms) is reasoned: the jitter between the microphone's chunk timestamps and how often a chunk goes missing are unmeasured.
 - In a recorded standing start the athlete leaned forward through the hold and was 0.16 torso lengths from rest at the gun, just over the tolerance of 0.15. Whether the tolerance is too strict for standing starts needs more recordings.
 
 ### Camera

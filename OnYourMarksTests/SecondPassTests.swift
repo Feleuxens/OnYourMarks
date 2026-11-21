@@ -12,11 +12,12 @@ struct SecondPassTests {
     private static let gun: TimeInterval = 2.85
 
     /// What the camera saw of the athlete's region in a frame: rest, and
-    /// from the movement on a growing part of it changes.
-    private func cells(at seconds: TimeInterval, frame: Int) -> [UInt8] {
+    /// from the movement on, or `delay` after it, a growing part of it changes.
+    private func cells(at seconds: TimeInterval, frame: Int, delay: TimeInterval = 0) -> [UInt8] {
         let cellCount = MotionSampler.gridSize * MotionSampler.gridSize
-        let moving = seconds >= SimulatedStart.movementBegins
-            ? Int(((seconds - SimulatedStart.movementBegins) * SimulatedStart.rate).rounded()) + 1
+        let begins = SimulatedStart.movementBegins + delay
+        let moving = seconds >= begins
+            ? Int(((seconds - begins) * SimulatedStart.rate).rounded()) + 1
             : 0
 
         return (0..<cellCount).map { cell in
@@ -28,22 +29,41 @@ struct SecondPassTests {
         }
     }
 
-    /// Every frame of the simulated video, with a pose on each.
-    private func frames(of simulated: SimulatedStart, athlete: AthleteID) -> [SecondPass.Frame] {
+    /// Every frame of the simulated video, with a pose on each. The pose of
+    /// frame `wrongPose` is off by a tenth of the picture, as pose detection
+    /// sometimes is for one frame.
+    private func frames(
+        of simulated: SimulatedStart,
+        athlete: AthleteID,
+        wrongPose: Int? = nil,
+        pictureDelay: TimeInterval = 0
+    ) -> [SecondPass.Frame] {
         simulated.recording.frameTimes.enumerated().map { index, time in
             let seconds = time.seconds - SimulatedStart.begin
+            var pose = SimulatedStart.pose(at: seconds)
+            if index == wrongPose {
+                pose = DetectedPose(
+                    joints: pose.joints.mapValues { CGPoint(x: $0.x, y: $0.y - 0.1) },
+                    confidence: pose.confidence,
+                    aspectRatio: pose.aspectRatio
+                )
+            }
             return SecondPass.Frame(
                 time: time,
-                poses: [SimulatedStart.pose(at: seconds)],
-                cells: [athlete: cells(at: seconds, frame: index)]
+                poses: [pose],
+                cells: [athlete: cells(at: seconds, frame: index, delay: pictureDelay)]
             )
         }
     }
 
-    private func analyse(_ simulated: SimulatedStart) throws -> RecordingAnalysis {
+    private func analyse(
+        _ simulated: SimulatedStart,
+        wrongPose: Int? = nil,
+        pictureDelay: TimeInterval = 0
+    ) throws -> RecordingAnalysis {
         let plan = try #require(SecondPass.plan(for: simulated.start))
         let athlete = try #require(plan.athletes.first)
-        let frames = frames(of: simulated, athlete: athlete.id)
+        let frames = frames(of: simulated, athlete: athlete.id, wrongPose: wrongPose, pictureDelay: pictureDelay)
 
         return SecondPass.analyse(
             frames,
@@ -103,6 +123,144 @@ struct SecondPassTests {
         #expect(analysis.frames.withPose == times.count)
         #expect(analysis.version == RecordingAnalysis.currentVersion)
         #expect(analysis.recordingID == simulated.recording.id)
+    }
+
+    /// One wrong pose in the rest is not the start: the pass, like the live
+    /// monitor, wants the next pose to agree, and finds the real one later.
+    @Test
+    func aSingleWrongPoseIsNotTheStart() throws {
+        let simulated = SimulatedStart(gun: Self.gun)
+        let times = simulated.recording.frameTimes
+        let wrong = try #require(times.firstIndex { $0.seconds - SimulatedStart.begin >= 2.5 })
+        let moving = try #require(times.firstIndex { $0.seconds - SimulatedStart.begin >= SimulatedStart.movementBegins })
+
+        let athlete = try #require(try analyse(simulated, wrongPose: wrong).athletes.first)
+        let clean = try #require(try analyse(simulated).athletes.first)
+
+        let poses = try #require(athlete.poseMovement)
+        #expect(poses.earliest > times[wrong])
+        #expect(athlete.poseMovement == clean.poseMovement)
+
+        let onset = try #require(athlete.onset?.onset)
+        #expect(onset.latest == times[moving])
+        #expect(athlete.decision == clean.decision)
+    }
+
+    /// By the crossing the poses had certainly moved. Pictures that still
+    /// showed rest then found something later; the poses' movement stands.
+    @Test
+    func aPictureChangeAfterThePosesMovedIsNotTheOnset() throws {
+        let simulated = SimulatedStart(gun: Self.gun)
+        let clean = try #require(try analyse(simulated).athletes.first)
+        let athlete = try #require(try analyse(simulated, pictureDelay: 0.2).athletes.first)
+
+        let poses = try #require(athlete.poseMovement)
+        #expect(athlete.poseMovement == clean.poseMovement)
+        #expect(athlete.onset == nil)
+        #expect(athlete.movement == poses)
+
+        let heard = try #require(StartReplay.gun(in: simulated.recording.session)?.heard)
+        #expect(athlete.reaction == poses.duration(since: heard))
+    }
+
+    /// Two athletes beside each other and one body in the video: it could
+    /// be either, so neither gets its poses.
+    @Test
+    func oneBodyIsNotGivenToTwoAthletes() throws {
+        let simulated = SimulatedStart(gun: Self.gun)
+        let (plan, neighbour) = try planWithNeighbour(of: simulated, apart: 0.02)
+        let athlete = try #require(plan.athletes.first)
+
+        let analysis = SecondPass.analyse(
+            frames(of: simulated, athlete: athlete.id),
+            plan: plan,
+            recordingID: simulated.recording.id,
+            video: RecordedVideoReader.Summary(decoded: simulated.recording.frameTimes.count, unmatched: 0),
+            duration: 1
+        )
+
+        let still = try #require(analysis.athlete(neighbour))
+        #expect(still.posedFrames == 0)
+        #expect(still.poseMovement == nil)
+        #expect(still.decision == nil)
+        #expect(analysis.athlete(athlete.id)?.posedFrames == 0)
+    }
+
+    /// With both bodies in the video, each athlete gets its own.
+    @Test
+    func twoBodiesGoToTheirOwnAthletes() throws {
+        let simulated = SimulatedStart(gun: Self.gun)
+        let (plan, neighbour) = try planWithNeighbour(of: simulated, apart: 0.3)
+        let athlete = try #require(plan.athletes.first)
+
+        let frames = frames(of: simulated, athlete: athlete.id).map { frame in
+            SecondPass.Frame(time: frame.time, poses: frame.poses + [Self.neighbourPose(apart: 0.3)], cells: frame.cells)
+        }
+        let analysis = SecondPass.analyse(
+            frames,
+            plan: plan,
+            recordingID: simulated.recording.id,
+            video: RecordedVideoReader.Summary(decoded: frames.count, unmatched: 0),
+            duration: 1
+        )
+
+        let moving = try #require(analysis.athlete(athlete.id))
+        let still = try #require(analysis.athlete(neighbour))
+        #expect(moving.posedFrames > 0)
+        #expect(moving.poseMovement != nil)
+        #expect(still.posedFrames > 0)
+        #expect(still.poseMovement == nil)
+    }
+
+    /// The simulated athlete at rest, `apart` to the right.
+    private static func neighbourPose(apart: CGFloat) -> DetectedPose {
+        let pose = SimulatedStart.pose(at: 2)
+        return DetectedPose(
+            joints: pose.joints.mapValues { CGPoint(x: $0.x + apart, y: $0.y) },
+            confidence: pose.confidence,
+            aspectRatio: pose.aspectRatio
+        )
+    }
+
+    /// The simulated start's plan with a second athlete on the roster who
+    /// stood still `apart` to the right of the first all along.
+    private func planWithNeighbour(
+        of simulated: SimulatedStart,
+        apart: CGFloat
+    ) throws -> (plan: SecondPass.Plan, neighbour: AthleteID) {
+        let plan = try #require(SecondPass.plan(for: simulated.start))
+        let athlete = try #require(plan.athletes.first)
+        let neighbour = AthleteID()
+        let quality = TrackingQuality(state: .tracked, jointCoverage: 1, confidence: 0.9, continuity: 1)
+
+        let tracking = plan.tracking.map { frame in
+            TrackingFrame(
+                time: frame.time,
+                athletes: frame.athletes + [
+                    TrackedAthlete(
+                        id: neighbour,
+                        state: .tracked,
+                        pose: Self.neighbourPose(apart: apart),
+                        lastSeen: frame.time,
+                        isVisible: true,
+                        quality: quality
+                    )
+                ],
+                phases: frame.phases,
+                cameraOffset: frame.cameraOffset
+            )
+        }
+
+        let still = SecondPass.Plan.Athlete(
+            id: neighbour,
+            position: 2,
+            region: nil,
+            stillSince: athlete.stillSince,
+            stableSince: athlete.stableSince,
+            liveConfirmation: nil,
+            quality: quality
+        )
+        return (SecondPass.Plan(athletes: plan.athletes + [still], gun: plan.gun, profile: plan.profile, tracking: tracking), neighbour)
     }
 
     @Test

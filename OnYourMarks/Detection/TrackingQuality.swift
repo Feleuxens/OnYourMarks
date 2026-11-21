@@ -69,4 +69,24 @@ nonisolated struct TrackingQuality: Equatable, Codable, Sendable {
         }
         return .good
     }
+
+    /// The worse of each measure. A movement confirmed by a second frame
+    /// is only as well seen as the poorer of the two: a good crossing
+    /// confirmed by a pose of one joint must not count as good.
+    func weaker(_ other: TrackingQuality) -> TrackingQuality {
+        TrackingQuality(
+            state: state == .tracked ? other.state : state,
+            jointCoverage: min(jointCoverage, other.jointCoverage),
+            confidence: min(confidence, other.confidence),
+            continuity: min(continuity, other.continuity)
+        )
+    }
+}
+
+extension TrackingQuality? {
+    /// See `TrackingQuality.weaker`; a missing quality says nothing.
+    nonisolated func weaker(_ other: TrackingQuality?) -> TrackingQuality? {
+        guard let self, let other else { return self ?? other }
+        return self.weaker(other)
+    }
 }

@@ -106,6 +106,7 @@ struct GunSchedulingTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         
         let audible = try #require(player.pendingSchedule?.audibleOnset.best)
         detector.emitMovement(at: audible.seconds + 0.15)
@@ -126,6 +127,7 @@ struct GunSchedulingTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         
         // Rendered already, but not yet heard.
         let renderStart = try #require(player.pendingSchedule?.renderStart)
@@ -188,12 +190,14 @@ struct GunSchedulingTests {
     /// it, brought to 0.03 s before it: the audio clock has the gun, the
     /// sequence is still in the hold.
     private func engineWithTheGunOut(
-        clock: ManualClock
+        clock: ManualClock,
+        setUp: (FakeMovementDetector) -> Void = { _ in }
     ) async -> (StarterEngine, FakeSignalPlayer, FakeMovementDetector) {
         let player = FakeSignalPlayer()
         player.gunDuration = 1
         player.cancellationLead = 0.05
         let (engine, _, detector, config) = makeEngine(holdTime: 0.2, player: player, clock: clock)
+        setUp(detector)
         
         engine.start(config: config)
         await waitUntil { player.pendingSchedule != nil }
@@ -214,6 +218,11 @@ struct GunSchedulingTests {
         detector.emitMovement(at: gun + 0.15)
         
         #expect(eventKinds(engine).contains(.gunCommitted))
+        
+        // Judged once the gun has been read back, 50 ms after its render start.
+        #expect(engine.athleteResults.isEmpty)
+        await clock.advance(by: player.pendingSchedule!.renderStart.seconds + 0.05 - clock.now().seconds)
+        await waitUntil { !engine.athleteResults.isEmpty }
         
         let result = try #require(engine.athleteResults.last)
         #expect(result.reaction?.best == (gun + 0.15) - gun)
@@ -350,6 +359,214 @@ struct GunSchedulingTests {
         engine.abort()
     }
     
+    /// A movement inside the read-back's 50 ms that would recall waits for
+    /// it: a gun that could not be read back convicts no one, even then.
+    @Test
+    func aReactionBeforeTheReadBackWaitsForIt() async throws {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 1
+        player.measuresPlayback = false
+        let (engine, _, detector, config) = makeEngine(holdTime: 0, player: player, clock: clock)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        detector.emitMovement(at: gun + 0.05)
+        
+        #expect(engine.athleteResults.isEmpty)
+        #expect(engine.state == .start)
+        
+        await clock.advance(by: 0.05)
+        await waitUntil { !engine.athleteResults.isEmpty }
+        
+        #expect(eventKinds(engine).contains(.gunPlaybackNotMeasured))
+        #expect(engine.athleteResults.last?.decision == .uncertain)
+        #expect(engine.state == .start)
+        #expect(player.recallCount == 0)
+        
+        engine.abort()
+    }
+    
+    @Test
+    func aReactionHeldForTheReadBackIsJudgedAgainstWhatItFound() async throws {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 1
+        let (engine, _, detector, config) = makeEngine(holdTime: 0, player: player, clock: clock)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+        detector.emitMovement(at: gun + 0.05)
+        
+        await clock.advance(by: 0.05)
+        await waitUntil { !engine.athleteResults.isEmpty }
+        
+        let kinds = eventKinds(engine)
+        let measured = try #require(kinds.firstIndex(of: .gunPlaybackMeasured))
+        let observed = try #require(kinds.firstIndex(of: .movementObserved(nil)))
+        #expect(measured < observed)
+        
+        #expect(engine.athleteResults.last?.decision == .definiteFalseStart)
+        #expect(engine.state == .falseStart)
+        
+        engine.abort()
+    }
+    
+    private static let good = TrackingQuality(state: .tracked, jointCoverage: 1, confidence: 0.9, continuity: 1)
+    
+    private func twoAthletes(_ ids: [AthleteID]) -> (FakeMovementDetector) -> Void {
+        { detector in
+            detector.roster = AthleteRoster(
+                entries: ids.enumerated().map { AthleteRoster.Entry(id: $0.element, position: $0.offset + 1, quality: Self.good) }
+            )
+        }
+    }
+    
+    /// A false start reads the gun back on the spot, before stopping it,
+    /// and judges who was held for it without a second recall.
+    @Test
+    func aFalseStartReadsBackTheGunForTheHeldMovements() async throws {
+        let clock = ManualClock()
+        let ids = [AthleteID(), AthleteID()]
+        let (engine, player, detector) = await engineWithTheGunOut(clock: clock, setUp: twoAthletes(ids))
+        
+        // Rendering; the second athlete's movement only arrives now.
+        let schedule = try #require(player.pendingSchedule)
+        await clock.advance(by: schedule.renderStart.seconds + 0.01 - clock.now().seconds)
+        
+        detector.emitMovement(at: schedule.audibleOnset.best.seconds + 0.05, athlete: ids[0], quality: Self.good)
+        #expect(engine.athleteResults.isEmpty)
+        
+        detector.emitMovement(at: schedule.renderStart.seconds - 0.02, athlete: ids[1], quality: Self.good)
+        
+        #expect(engine.state == .falseStart)
+        #expect(eventKinds(engine).contains(.gunPlaybackMeasured))
+        #expect(engine.athleteResults.map { $0.athleteID } == [ids[1], ids[0]])
+        #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart, .definiteFalseStart])
+        
+        await waitUntil { player.recallCount == 3 }
+        await clock.advance(by: StarterEngine.falseStartCollection)
+        await waitUntil { !engine.isRunning }
+        #expect(player.recallCount == 3)
+    }
+    
+    /// Recalled before the render: there is nothing to read back, so a held
+    /// movement convicts no one.
+    @Test
+    func aFalseStartBeforeTheRenderLeavesTheHeldMovementsUncertain() async throws {
+        let clock = ManualClock()
+        let ids = [AthleteID(), AthleteID()]
+        let (engine, player, detector) = await engineWithTheGunOut(clock: clock, setUp: twoAthletes(ids))
+        
+        let schedule = try #require(player.pendingSchedule)
+        detector.emitMovement(at: schedule.audibleOnset.best.seconds + 0.05, athlete: ids[0], quality: Self.good)
+        detector.emitMovement(at: schedule.renderStart.seconds - 0.02, athlete: ids[1], quality: Self.good)
+        
+        #expect(engine.state == .falseStart)
+        #expect(eventKinds(engine).contains(.gunPlaybackNotMeasured))
+        #expect(engine.athleteResults.map { $0.decision } == [.definiteFalseStart, .uncertain])
+        
+        engine.abort()
+    }
+    
+    /// The cancellation lead can be longer than the read-back's delay: the
+    /// delay counts from the render start, not from the commit.
+    @Test
+    func theGunIsReadBackAfterItsRenderStartHoweverEarlyItIsCommitted() async throws {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 1
+        player.cancellationLead = 0.06
+        let (engine, _, detector, config) = makeEngine(holdTime: 0.2, player: player, clock: clock)
+        
+        engine.start(config: config)
+        await waitUntil { player.pendingSchedule != nil }
+        let schedule = try #require(player.pendingSchedule)
+        
+        // Committed by a movement the moment the gun is out.
+        await clock.advance(by: schedule.cancellableUntil.seconds - clock.now().seconds)
+        detector.emitMovement(at: schedule.audibleOnset.best.seconds + 0.15)
+        #expect(eventKinds(engine).contains(.gunCommitted))
+        
+        await clock.advance(by: 0.05)
+        #expect(!eventKinds(engine).contains(.gunPlaybackNotMeasured))
+        #expect(engine.athleteResults.isEmpty)
+        
+        await clock.advance(by: schedule.renderStart.seconds + 0.05 - clock.now().seconds)
+        await waitUntil { !engine.athleteResults.isEmpty }
+        
+        #expect(eventKinds(engine).contains(.gunPlaybackMeasured))
+        #expect(engine.athleteResults.last?.decision == .legal)
+        
+        engine.abort()
+    }
+    
+    /// The detector sends the pixel onset right after the movement. Held
+    /// together, the movement is judged first and the onset refines it.
+    @Test
+    func theOnsetOfAHeldMovementIsKept() async throws {
+        let clock = ManualClock()
+        let ids = [AthleteID()]
+        let (engine, player, detector) = await engineWithTheGunOut(clock: clock, setUp: twoAthletes(ids))
+        
+        let schedule = try #require(player.pendingSchedule)
+        let gun = schedule.audibleOnset.best.seconds
+        detector.emitMovement(at: gun + 0.2, since: gun + 0.1, athlete: ids[0], quality: Self.good)
+        detector.emitRefinement(from: gun + 0.15, to: gun + 0.16, athlete: ids[0])
+        #expect(engine.athleteResults.isEmpty)
+        
+        await clock.advance(by: schedule.renderStart.seconds + 0.05 - clock.now().seconds)
+        await waitUntil { !engine.athleteResults.isEmpty }
+        
+        let result = try #require(engine.athleteResults.first)
+        #expect(result.isRefined)
+        #expect(result.movement.earliest.seconds == gun + 0.15)
+        #expect(result.decision == .legal)
+        
+        let kinds = eventKinds(engine)
+        let decided = try #require(kinds.firstIndex(of: .decision(.legal)))
+        let refined = try #require(kinds.firstIndex { if case .movementOnsetRefined = $0 { true } else { false } })
+        #expect(decided < refined)
+        
+        engine.abort()
+    }
+    
+    /// The render on its schedule, but the output reports less latency by
+    /// the read-back: the gun is heard earlier than scheduled.
+    @Test
+    func aGunHeardOffItsScheduleIsRevisedEvenIfRenderedOnTime() async throws {
+        let clock = ManualClock()
+        let player = FakeSignalPlayer()
+        player.gunDuration = 1
+        player.outputLatency = 0.010
+        let (engine, _, _, config) = makeEngine(holdTime: 0, player: player, clock: clock)
+        
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        
+        let schedule = try #require(player.pendingSchedule)
+        player.outputLatency = 0.002
+        await clock.advance(by: 0.06)
+        
+        let revised = try #require(event(.gunTimeRevised, in: engine)?.time)
+        #expect(revised.best.seconds == schedule.renderStart.seconds + 0.002)
+        #expect(revised.earliest.seconds == schedule.renderStart.seconds + 0.002)
+        #expect(revised.latest == schedule.audibleOnset.latest)
+        
+        // The replay keeps judging by the scheduled render start, as the engine does.
+        let session = try #require(engine.currentSession)
+        let replayed = try #require(StartReplay.gun(in: session))
+        let basis = try #require(player.pendingSchedule?.basis)
+        #expect(replayed.heard == revised)
+        #expect(replayed.renderStart == StartReplay.renderStart(of: schedule.audibleOnset, basis: basis))
+        
+        engine.abort()
+    }
+    
     private static let wirelessRoute = OutputRoute(id: "headphones", name: "Headphones", isWireless: true, isBuiltInSpeaker: false)
     
     @Test
@@ -361,6 +578,7 @@ struct GunSchedulingTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         detector.emitMovement(at: gun + 0.05)
@@ -400,6 +618,7 @@ struct GunSchedulingTests {
         
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
         detector.emitMovement(at: gun + 0.05)

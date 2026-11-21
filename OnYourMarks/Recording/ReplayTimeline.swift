@@ -30,9 +30,6 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
     /// Movements that one pose showed and nothing confirmed; not judged.
     let unconfirmed: [UnconfirmedMovement]
 
-    /// What a measurement found; empty for a start.
-    let probeResults: [ProbeResult]
-
     /// Ordered by time.
     private let tracking: [TrackingFrame]
 
@@ -45,7 +42,6 @@ nonisolated struct ReplayTimeline: Equatable, Sendable {
         unconfirmed = recording.session.events.compactMap { event in
             if case .movementUnconfirmed(let movement) = event.kind { movement } else { nil }
         }
-        probeResults = recording.session.probeResults
         self.tracking = tracking.sorted { $0.time < $1.time }
     }
 

@@ -609,6 +609,49 @@ struct AthleteMotionMonitorTests {
         #expect(scene.step([pose(at: 0.3, shiftedBy: 0.1)]).movements.map { $0.athleteID } == [id])
     }
 
+    /// After a stall the next pose comes too late to confirm the crossing:
+    /// it would time the movement from a frame that long ago. The pose
+    /// counts on its own and needs a second one again.
+    @Test
+    func aPoseAfterAStallDoesNotConfirmAnOldCrossing() throws {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+        let crossing = scene.now
+
+        scene.now += 0.3
+        let late = scene.step([pose(at: 0.3, shiftedBy: 0.1)])
+        let lateTime = scene.now
+        #expect(late.movements.isEmpty)
+        #expect(late.unconfirmed.map { $0.reason } == [.notSeenAgain])
+        #expect(late.unconfirmed.first?.time == time(crossing))
+
+        let movement = try #require(scene.step([pose(at: 0.3, shiftedBy: 0.1)]).movements.first)
+        #expect(movement.athleteID == id)
+        #expect(movement.time == time(lateTime))
+    }
+
+    /// One joint is too little to hold a movement against an athlete; a
+    /// good crossing it confirms is judged as poorly tracked.
+    @Test
+    func aMovementIsJudgedByTheWeakerOfItsTwoFrames() throws {
+        var scene = Scene()
+        let id = scene.begin([0.3])[0].id
+        scene.settle([pose(at: 0.3)])
+
+        let crossing = scene.now + frame
+        scene.step([pose(at: 0.3, shiftedBy: 0.08)])
+
+        let neck = DetectedPose(joints: [.neck: CGPoint(x: 0.4, y: 0.7)], confidence: 0.9)
+        let movement = try #require(scene.step([neck]).movements.first)
+
+        #expect(movement.athleteID == id)
+        #expect(movement.time == time(crossing))
+        #expect(movement.quality?.level == .poor)
+    }
+
     @Test
     func aCrossingStillWaitingWhenMonitoringEndsIsReported() {
         var scene = Scene()

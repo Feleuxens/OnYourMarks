@@ -51,7 +51,7 @@ TEST_RUNNER_RUN_CAMERA=1 xcodebuild test -scheme OnYourMarks -destination 'id=<d
 |---|---|---|
 | `TEST_RUNNER_RUN_CALIBRATION=1` | Real calibrations, route check, the gun heard against the timing model (about 20 audible gunshots) | Microphone access. In the simulator: `xcrun simctl privacy <simulator id> grant microphone de.feleuxens.OnYourMarks` |
 | `TEST_RUNNER_RUN_CANCELLATION_LEAD=1` | Guns stopped around `OutputTiming.cancellationLead`; reports which stops let sound through (about 70 gunshots per output) | Microphone access |
-| `TEST_RUNNER_RUN_CAMERA=1` | Real capture: frame rates, the precision window, exposure lock, pose throughput, recording, the probe | A device with camera access |
+| `TEST_RUNNER_RUN_CAMERA=1` | Real capture: frame rates, the precision window, exposure lock, pose throughput, recording | A device with camera access |
 | `TEST_RUNNER_RUN_SYNC_PEER=1` | `twoPhonesSynchronize`: pairs with another device running the same test, synchronizes 60 s, attaches `sync-peer.txt` | Two devices (or a device and a simulator) on one network, started together; local network access on the device |
 | `TEST_RUNNER_SEED_RECORDING=1` | Puts a made-up recorded start into the library, so the review can be looked at in the simulator | Nothing |
 | `TEST_RUNNER_FIELD_DATA=<folder>` | Replay and second pass over every recorded start in the folder | Recordings copied from a phone |

@@ -256,6 +256,7 @@ struct DecisionReplayTests {
 
         engine.start(config: config)
         await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
         let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
 
         // Uncertain live, a false start once refined; and a legal one.
@@ -271,6 +272,42 @@ struct DecisionReplayTests {
         #expect(replay.replayedResults == replay.storedResults)
         #expect(replay.isReproduced)
         #expect(replay.replayedResults.first?.decision == .definiteFalseStart)
+    }
+
+    /// Recorded before the engine rejected such refinements: the replay
+    /// rejects it as the engine now does.
+    @Test
+    func aStoredRefinementThatBeganAfterTheMovementIsIgnored() async throws {
+        let ids = [AthleteID()]
+        let (engine, player, detector, config) = makeEngine(athletes: ids, holdTime: 0)
+
+        engine.start(config: config)
+        await waitUntil { engine.state == .start }
+        await waitForGunReadBack(engine)
+        let gun = try #require(player.pendingSchedule?.audibleOnset.best.seconds)
+
+        detector.emitMovement(at: gun + 0.12, since: gun + 0.06, athlete: ids[0], quality: good)
+        await waitUntil { !engine.isRunning }
+
+        let live = try recording(of: engine)
+        var session = live.session
+        let refinement = OnsetRefinement(
+            athleteID: ids[0],
+            onset: TimeEstimate(
+                best: MonotonicTimestamp(seconds: gun + 0.1415),
+                earliest: MonotonicTimestamp(seconds: gun + 0.131),
+                latest: MonotonicTimestamp(seconds: gun + 0.152)
+            ),
+            droppedFrames: 0
+        )
+        session.record(.movementOnsetRefined(refinement), at: refinement.onset, source: .cameraLocal, athleteID: ids[0])
+
+        let replay = StartReplay.decisions(
+            of: StartRecording(id: live.id, date: live.date, session: session, results: live.results, frameTimes: [], skippedFrames: 0)
+        )
+        #expect(replay.isReproduced)
+        #expect(replay.replayedResults.first?.decision == .uncertain)
+        #expect(replay.replayedResults.first?.isRefined == false)
     }
 
     @Test

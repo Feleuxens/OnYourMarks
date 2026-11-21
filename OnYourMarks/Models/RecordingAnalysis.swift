@@ -25,7 +25,9 @@ import Foundation
 nonisolated struct RecordingAnalysis: Equatable, Codable, Sendable {
     /// Raised when what is stored here changes its meaning. An analysis of
     /// another version is not shown; the pass runs again.
-    static let currentVersion = 1
+    /// 2: one track per athlete, the weaker frame's tracking, no onset
+    /// after the poses' crossing.
+    static let currentVersion = 2
 
     let version: Int
     let recordingID: UUID
@@ -57,7 +59,8 @@ nonisolated struct RecordingAnalysis: Equatable, Codable, Sendable {
 
         /// From the pictures of every frame, looked for back from the
         /// movement the poses confirmed (or, without one, the live
-        /// confirmation). Nil if the pictures allowed no statement.
+        /// confirmation). Nil if the pictures allowed no statement, or if
+        /// they still showed rest when the poses had certainly moved.
         let onset: OnsetRefinement?
 
         /// What the second pass says about the movement: the onset from the
@@ -82,7 +85,8 @@ nonisolated struct RecordingAnalysis: Equatable, Codable, Sendable {
         let parameters: MotionOnsetAnalyzer.Parameters?
 
         /// Frames in which the athlete had a pose, from the beginning of
-        /// their last rest to the end of the video.
+        /// their last rest to the end of the video. None if no track could
+        /// be told to be the athlete's.
         let posedFrames: Int
     }
 

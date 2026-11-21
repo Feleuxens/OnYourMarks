@@ -113,6 +113,42 @@ nonisolated struct AthleteMotionMonitor: Sendable {
         wasReady = isReady
     }
 
+    /// What an athlete's next judged pose says about a crossing.
+    enum Confirmation: Equatable, Sendable {
+        case confirmed
+        /// The pose is back under the threshold: the crossing stood alone.
+        case contradicted
+        /// The pose came after `confirmationWait`, e.g. after a stall. It
+        /// says nothing about the crossing's frame any more, and confirming
+        /// it would time the movement from that frame.
+        case expired
+    }
+
+    /// The two-pose rule, for the live monitor and the second pass alike.
+    /// A crossing that isn't confirmed is withdrawn from `stability`; the
+    /// pose then counts like any other.
+    static func confirm(
+        crossingAt crossing: MonotonicTimestamp,
+        by joints: AthleteStability.Joints,
+        aspectRatio: CGFloat,
+        at time: MonotonicTimestamp,
+        stability: inout AthleteStability
+    ) -> Confirmation {
+        let confirmation: Confirmation = if time.seconds - crossing.seconds > confirmationWait {
+            .expired
+        } else if let movement = stability.movement(of: joints, aspectRatio: aspectRatio),
+                  movement > stability.profile.movementThreshold {
+            .confirmed
+        } else {
+            .contradicted
+        }
+
+        if confirmation != .confirmed {
+            stability.withdrawStart()
+        }
+        return confirmation
+    }
+
     /// Withdraws the athletes' crossings and reports them, oldest first.
     private mutating func giveUp(
         _ athletes: some Sequence<AthleteID>,
@@ -162,17 +198,27 @@ nonisolated struct AthleteMotionMonitor: Sendable {
                 CGPoint(x: $0.x - cameraOffset.x, y: $0.y - cameraOffset.y)
             }
 
-            if let candidate = candidates.removeValue(forKey: athlete.id) {
-                let movement = stability[athlete.id]?.movement(of: joints, aspectRatio: athlete.pose.aspectRatio)
+            if let candidate = candidates.removeValue(forKey: athlete.id), var athleteStability = stability[athlete.id] {
+                let confirmation = Self.confirm(
+                    crossingAt: candidate.time,
+                    by: joints,
+                    aspectRatio: athlete.pose.aspectRatio,
+                    at: time,
+                    stability: &athleteStability
+                )
+                stability[athlete.id] = athleteStability
 
-                if let movement, let profile = stability[athlete.id]?.profile, movement > profile.movementThreshold {
-                    events.append(.movement(candidate.confirmed(at: time)))
+                switch confirmation {
+                case .confirmed:
+                    events.append(.movement(candidate.confirmed(at: time, quality: athlete.quality)))
                     continue
-                }
 
-                // The crossing stood alone. This frame is judged like any other.
-                stability[athlete.id]?.withdrawStart()
-                events.append(.movementUnconfirmed(UnconfirmedMovement(candidate, athleteID: athlete.id, reason: .contradicted)))
+                // This frame is judged like any other.
+                case .contradicted:
+                    events.append(.movementUnconfirmed(UnconfirmedMovement(candidate, athleteID: athlete.id, reason: .contradicted)))
+                case .expired:
+                    events.append(.movementUnconfirmed(UnconfirmedMovement(candidate, athleteID: athlete.id, reason: .notSeenAgain)))
+                }
             }
 
             let event = stability[athlete.id]?.process(joints, aspectRatio: athlete.pose.aspectRatio, at: time)

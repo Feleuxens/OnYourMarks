@@ -26,6 +26,13 @@ nonisolated enum SecondPass {
     /// more complete. Reasoned, not measured.
     static let followUp: TimeInterval = 0.1
 
+    /// A track that another athlete voted for this often, against the
+    /// votes of the one it went to, could be either of them: neither gets
+    /// it. Two athletes standing close to one body both find it nearest in
+    /// every frame; an athlete near its own body finds a neighbour's track
+    /// nearest only in the odd frame. Reasoned, not measured.
+    static let ambiguousVoteShare = 0.5
+
     /// What the second pass looks for, worked out from the live record
     /// before the video is read.
     struct Plan: Equatable, Sendable {
@@ -138,12 +145,13 @@ nonisolated enum SecondPass {
         duration: TimeInterval
     ) -> RecordingAnalysis {
         let tracks = track(frames)
+        let trackIDs = trackIDs(of: plan.athletes, in: frames, tracks: tracks, plan: plan)
 
         var events: [StartEvent] = []
         var athletes: [RecordingAnalysis.Athlete] = []
 
         for athlete in plan.athletes {
-            let result = analyse(athlete, in: frames, tracks: tracks, plan: plan)
+            let result = analyse(athlete, trackID: trackIDs[athlete.id], in: frames, tracks: tracks, plan: plan)
             athletes.append(result)
 
             guard let movement = result.movement else { continue }
@@ -194,16 +202,54 @@ nonisolated enum SecondPass {
         }
     }
 
-    /// Which of the second pass's tracks is the live athlete: the one whose
-    /// poses lay nearest to the live ones, in the frames both have, most
-    /// often while the athlete was watched.
-    private static func trackID(
+    /// Which of the second pass's tracks is which live athlete, each track
+    /// for one athlete at most: the one whose poses lay nearest to the live
+    /// ones most often. An athlete whose track another athlete also voted
+    /// for nearly as often gets none: one body's movement must not become
+    /// two athletes' starts.
+    static func trackIDs(
+        of athletes: [Plan.Athlete],
+        in frames: [Frame],
+        tracks: [[TrackedAthlete]],
+        plan: Plan
+    ) -> [AthleteID: AthleteID] {
+        let end = frames.last?.time ?? .init(seconds: 0)
+        let votes = athletes.map { athlete in
+            let watchedUntil = athlete.liveConfirmation.map { MonotonicTimestamp(seconds: $0.seconds + followUp) } ?? end
+            return (athlete: athlete.id, votes: trackVotes(of: athlete, in: frames, tracks: tracks, plan: plan, until: watchedUntil))
+        }
+
+        let candidates = votes
+            .flatMap { entry in entry.votes.map { (athlete: entry.athlete, track: $0.key, votes: $0.value) } }
+            .sorted { $0.votes > $1.votes }
+
+        var assigned: [AthleteID: AthleteID] = [:]
+        var decided: Set<AthleteID> = []
+        var taken: Set<AthleteID> = []
+
+        for candidate in candidates where !decided.contains(candidate.athlete) && !taken.contains(candidate.track) {
+            let rivals = candidates.filter { $0.track == candidate.track && $0.athlete != candidate.athlete }
+            let isAmbiguous = rivals.contains { Double($0.votes) >= ambiguousVoteShare * Double(candidate.votes) }
+
+            decided.insert(candidate.athlete)
+            taken.insert(candidate.track)
+
+            if !isAmbiguous {
+                assigned[candidate.athlete] = candidate.track
+            }
+        }
+        return assigned
+    }
+
+    /// How often each of the second pass's tracks lay nearest to the live
+    /// athlete's poses, in the frames both have, while it was watched.
+    private static func trackVotes(
         of athlete: Plan.Athlete,
         in frames: [Frame],
         tracks: [[TrackedAthlete]],
         plan: Plan,
         until end: MonotonicTimestamp
-    ) -> AthleteID? {
+    ) -> [AthleteID: Int] {
         let indices = Dictionary(frames.enumerated().map { ($1.time, $0) }, uniquingKeysWith: { first, _ in first })
         let begin = athlete.stillSince ?? athlete.stableSince ?? .init(seconds: -.greatestFiniteMagnitude)
         var votes: [AthleteID: Int] = [:]
@@ -222,22 +268,23 @@ nonisolated enum SecondPass {
                 votes[nearest.id, default: 0] += 1
             }
         }
-        return votes.max { $0.value < $1.value }?.key
+        return votes
     }
 
     private static func analyse(
         _ athlete: Plan.Athlete,
+        trackID id: AthleteID?,
         in frames: [Frame],
         tracks: [[TrackedAthlete]],
         plan: Plan
     ) -> RecordingAnalysis.Athlete {
-        let end = frames.last?.time ?? .init(seconds: 0)
-        let watchedUntil = athlete.liveConfirmation.map { MonotonicTimestamp(seconds: $0.seconds + followUp) } ?? end
-        let id = trackID(of: athlete, in: frames, tracks: tracks, plan: plan, until: watchedUntil)
-
-        // The poses of every frame from the beginning of the last rest.
+        // The poses of every frame from the beginning of the last rest,
+        // confirmed by two poses as live: one wrong pose would otherwise
+        // become the reaction and end the search before the real start.
         var stability = AthleteStability(profile: plan.profile.motion)
+        var crossing: (time: MonotonicTimestamp, onset: TimeEstimate?, quality: TrackingQuality)?
         var poseMovement: TimeEstimate?
+        var quality = athlete.quality
         var confirmation: MonotonicTimestamp?
         var posedFrames = 0
 
@@ -246,15 +293,43 @@ nonisolated enum SecondPass {
                 guard let tracked = athletes.first(where: { $0.id == id && $0.isVisible }) else { continue }
                 posedFrames += 1
 
-                if confirmation == nil,
-                   stability.process(tracked.pose.joints, aspectRatio: tracked.pose.aspectRatio, at: frame.time) == .started {
-                    confirmation = frame.time
-                    poseMovement = stability.onset
+                guard confirmation == nil else { continue }
+
+                if let pending = crossing {
+                    crossing = nil
+
+                    let confirmed = AthleteMotionMonitor.confirm(
+                        crossingAt: pending.time,
+                        by: tracked.pose.joints,
+                        aspectRatio: tracked.pose.aspectRatio,
+                        at: frame.time,
+                        stability: &stability
+                    ) == .confirmed
+
+                    // Timed from the crossing, as the live movement is, and
+                    // judged by the weaker of the two frames.
+                    if confirmed {
+                        confirmation = pending.time
+                        poseMovement = pending.onset
+                        quality = quality.weaker(pending.quality.weaker(tracked.quality))
+                        continue
+                    }
+                }
+
+                if stability.process(tracked.pose.joints, aspectRatio: tracked.pose.aspectRatio, at: frame.time) == .started {
+                    crossing = (frame.time, stability.onset, tracked.quality)
                 }
             }
         }
 
-        let looked = lookForOnset(of: athlete, in: frames, confirmedAt: confirmation ?? athlete.liveConfirmation)
+        let crossed = confirmation ?? athlete.liveConfirmation
+        var looked = lookForOnset(of: athlete, in: frames, confirmedAt: crossed)
+
+        // By the crossing the poses had certainly moved; pictures still at
+        // rest then found something later, not this movement's beginning.
+        if let onset = looked.onset, let crossed, onset.interval.earliest > crossed {
+            looked.onset = nil
+        }
         let movement = looked.onset?.interval ?? poseMovement
         let reaction = plan.gun.flatMap { gun in movement.map { $0.duration(since: gun.heard) } }
 
@@ -263,13 +338,13 @@ nonisolated enum SecondPass {
             engine.judge(
                 reaction,
                 movement: movement,
-                quality: athlete.quality,
+                quality: quality,
                 profile: plan.profile,
                 gunTimeIsTrusted: gun.isTrusted,
                 renderStart: gun.renderStart
             )
         } else if movement != nil {
-            engine.evaluateMovementBeforeGun(trackingQuality: athlete.quality)
+            engine.evaluateMovementBeforeGun(trackingQuality: quality)
         } else {
             nil
         }

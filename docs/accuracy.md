@@ -3,7 +3,7 @@
 A reaction time is the time from when the athlete heard the gun to when they began to move. OnYourMarks measures both ends and shows how sure it is: `150 ms ± 7 ms`.
 
 > [!WARNING]
-> The reaction times have not been checked against an independent reference yet. The [timing probe](features/timing-probe.md) is built for that check; it has not been run with a real light. Until then, treat the times as precise to the stated interval only under the assumptions below.
+> The reaction times have not been checked against an independent reference yet. Until then, treat the times as precise to the stated interval only under the assumptions below.
 
 ## Every time is an interval
 
@@ -25,9 +25,9 @@ After the gun the app reads back when it actually played. If that differs from t
 |---|---|
 | Gun start against its schedule | under 0.1 ms |
 | iPhone speaker: expected against heard by the microphone | 1.7 ms ± 1.1 ms |
-| Bluetooth speaker: delay reported by iOS / measured by calibration | 180 ms / 107 ms ± 2 ms |
+| Bluetooth speaker: delay reported by iOS / measured by calibration | 180 ms / 287 ms ± 2 ms |
 
-The last line is why [Bluetooth is best effort](features/audio-output.md): the reported delay was 73 ms off.
+The last line is why [Bluetooth is best effort](features/audio-output.md): the reported delay was 107 ms too short.
 
 ## The movement
 

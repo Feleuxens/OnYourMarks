@@ -45,13 +45,18 @@ nonisolated enum StartReplay {
     private struct GunState {
         var scheduled: (heard: TimeEstimate, basis: SignalTimingBasis)?
         var fired: (heard: TimeEstimate, basis: SignalTimingBasis)?
+        /// The fired gun's render start, from its scheduled heard time: a
+        /// revision widens the heard time, but the engine keeps judging by
+        /// the scheduled render start, and a revision for a changed latency
+        /// would put it elsewhere.
+        var renderStart: MonotonicTimestamp?
         var notMeasured = false
 
         var gun: Gun? {
             fired.map {
                 Gun(
                     heard: $0.heard,
-                    renderStart: StartReplay.renderStart(of: $0.heard, basis: $0.basis),
+                    renderStart: renderStart ?? StartReplay.renderStart(of: $0.heard, basis: $0.basis),
                     isTrusted: !notMeasured && !$0.basis.isCalibrationMissing
                 )
             }
@@ -64,9 +69,9 @@ nonisolated enum StartReplay {
             case .gunCancelled:
                 scheduled = nil
             case .gunCommitted:
-                fired = scheduled
+                fire()
             case .stateChanged(.start) where fired == nil:
-                fired = scheduled
+                fire()
             case .gunTimeRevised:
                 fired = fired.map { (event.time, $0.basis) }
             case .gunPlaybackNotMeasured:
@@ -74,6 +79,11 @@ nonisolated enum StartReplay {
             default:
                 break
             }
+        }
+
+        private mutating func fire() {
+            fired = scheduled
+            renderStart = scheduled.map { StartReplay.renderStart(of: $0.heard, basis: $0.basis) }
         }
     }
 
@@ -176,7 +186,10 @@ nonisolated enum StartReplay {
                 )
 
             case .movementOnsetRefined(let refinement):
-                guard let index = results.firstIndex(where: { $0.athleteID == refinement.athleteID }) else { continue }
+                // Recorded before the engine rejected a refinement that
+                // began after the movement; the engine would not take it now.
+                guard let index = results.firstIndex(where: { $0.athleteID == refinement.athleteID }),
+                      !refinement.beganAfter(results[index].movement) else { continue }
 
                 let live = results[index]
 

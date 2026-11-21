@@ -58,16 +58,36 @@ final class StarterEngine {
     private var gunTime: TimeEstimate?
     private var scheduledGun: ScheduledSignal?
     
-    /// Set when the gun could not be found on the render timeline: nothing
-    /// says it was heard when it was scheduled.
-    private var gunWasNotMeasured = false
+    /// Where reading the committed gun back from the render timeline
+    /// stands. Nil until the gun is committed.
+    private var gunReadBack: GunReadBack?
+    private var gunReadBackTask: Task<Void, Never>?
+
+    /// Movements that began once the gun was rendered and arrived before
+    /// the read-back said when it was heard. They are judged against the
+    /// time it gives, or as untrusted if it found nothing: a movement can
+    /// arrive within the read-back's 50 ms, and judged before it, a recall
+    /// would rest on a gun nothing has confirmed.
+    private var heldMovements: [MovementObservation] = []
+    /// Refinements of held movements; the detector sends one right after
+    /// its movement. Taken in once the movement is judged.
+    private var heldRefinements: [OnsetRefinement] = []
+
+    private enum GunReadBack {
+        case pending
+        case measured
+        /// Nothing says the gun was heard when it was scheduled.
+        case failed
+    }
 
     /// Listens for the committed gun with the microphone, if the player
     /// can. An observation only: what it finds goes into the session, not
     /// into a decision.
     private var gunHearing: Task<Void, Never>?
 
-    /// Long enough for the first render cycles to have passed.
+    /// Long enough for the first render cycles to have passed, and early:
+    /// the read-back extrapolates over the time since the start, so any
+    /// clock drift grows with it. Reasoned.
     private static let gunMeasurementDelay: TimeInterval = 0.05
     
     /// Recall shots after a false start, and the pause between them.
@@ -125,19 +145,6 @@ final class StarterEngine {
     
     private var monitoringActive: Bool = false
     private var precisionWindowActive = false
-
-    /// The regions a measurement watches instead of athletes; empty for a start.
-    private var probeRegions: [ProbeRegion] = []
-    /// Every step the probed regions made in this run.
-    private var probeSteps: [ProbeObservation] = []
-
-    /// What the last measurement found, one per region that changed; set
-    /// when the run ends.
-    private(set) var probeResults: [ProbeResult] = []
-
-    private var isProbing: Bool {
-        !probeRegions.isEmpty
-    }
     
     /// Capture time of the last frame before the camera failed after the
     /// gun. Movements seen in later frames are not judged: the frames in
@@ -197,7 +204,7 @@ final class StarterEngine {
         
         gunTime = nil
         scheduledGun = nil
-        gunWasNotMeasured = false
+        resetGunReadBack()
         gunHearing?.cancel()
         gunHearing = nil
         roster = nil
@@ -214,10 +221,6 @@ final class StarterEngine {
         followThrough = nil
         endPrecisionWindow()
         
-        probeRegions = config.probeRegions
-        probeSteps = []
-        probeResults = []
-
         recallsFalseStarts = config.recallsFalseStarts
         recordsVideo = config.recordsVideo
         recordingAfterStart = config.recordingAfterStart
@@ -289,7 +292,6 @@ final class StarterEngine {
         
         player.stop()
         stopMovementMonitoring()
-        recordProbeResults()
 
         if let recordingEnd {
             followThrough = Task { [weak self] in
@@ -304,6 +306,9 @@ final class StarterEngine {
         
         gunTime = nil
         scheduledGun = nil
+        // A completed or recalled run has read the gun back; an aborted one
+        // drops the movements still held for it.
+        resetGunReadBack()
         // A completed run waited for it; any other run ends without it.
         gunHearing?.cancel()
         gunHearing = nil
@@ -377,9 +382,6 @@ final class StarterEngine {
 
         case .movementUnconfirmed(let movement):
             handleUnconfirmed(movement)
-
-        case .probeChanged(let observation):
-            handleProbe(observation)
         }
     }
     
@@ -432,45 +434,6 @@ final class StarterEngine {
         }
     }
 
-    /// A step in a probed region. Every one is kept; which one is measured
-    /// against the gun is decided when the run ends, with the gun's final time.
-    private func handleProbe(_ observation: ProbeObservation) {
-        guard monitoringActive, probeRegions.contains(where: { $0.id == observation.regionID }) else { return }
-
-        probeSteps.append(observation)
-        record(.probeChanged(observation), at: observation.change, source: movementDetector.source)
-
-        // Once every region has changed since the gun there is nothing left to wait for.
-        guard let gunTime else { return }
-
-        let changedSinceGun = Set(probeSteps.filter { $0.change.latest >= gunTime.earliest }.map { $0.regionID })
-
-        if probeRegions.allSatisfy({ changedSinceGun.contains($0.id) }) {
-            stopMovementMonitoring()
-            wakeSequence()
-        }
-    }
-
-    /// Measures every probed region against the gun: the step nearest to it.
-    private func recordProbeResults() {
-        guard let gunTime, isProbing else { return }
-
-        probeResults = ProbeResult.nearest(of: probeSteps, to: gunTime)
-
-        for result in probeResults {
-            record(.probeMeasured(result), at: result.observation.change, source: movementDetector.source)
-
-            logger.info(
-                """
-                Probe changed \(result.offset.best * 1000, format: .fixed(precision: 1)) ms after the gun \
-                (\(result.offset.earliest * 1000, format: .fixed(precision: 1)) to \
-                \(result.offset.latest * 1000, format: .fixed(precision: 1)) ms), \
-                readout position \(result.observation.readoutPosition, format: .fixed(precision: 2))
-                """
-            )
-        }
-    }
-
     /// A movement nothing backed is not judged, only kept for the review.
     private func handleUnconfirmed(_ movement: UnconfirmedMovement) {
         guard roster?.contains(movement.athleteID) == true else { return }
@@ -512,9 +475,10 @@ final class StarterEngine {
         
         guard let profile = currentSession?.profile else { return }
         
-        // Seen once the camera came back: no result rather than one that
-        // spans the frames that are missing.
-        if let cameraFailedAfter, observation.time > cameraFailedAfter {
+        // Seen or confirmed once the camera came back: no result rather
+        // than one that spans the frames that are missing. Confirmation is
+        // never before the crossing, so it decides for both frames.
+        if let cameraFailedAfter, observation.confirmedAt > cameraFailedAfter {
             logger.notice("Movement after the camera failed: not judged")
             return
         }
@@ -523,11 +487,25 @@ final class StarterEngine {
         // report can still arrive from a frame analysed before monitoring ended.
         if let athleteID {
             guard roster?.contains(athleteID) == true,
-                  !athleteResults.contains(where: { $0.athleteID == athleteID }) else {
+                  !athleteResults.contains(where: { $0.athleteID == athleteID }),
+                  !heldMovements.contains(where: { $0.athleteID == athleteID }) else {
                 return
             }
         }
         
+        // Only a movement over before the gun was rendered needs no time
+        // for it, and is judged at once.
+        if gunTime != nil, gunReadBack == .pending, let gun = scheduledGun, observation.onset.latest >= gun.renderStart {
+            heldMovements.append(observation)
+            return
+        }
+        
+        judge(observation, profile: profile)
+    }
+    
+    /// Records a movement and decides on it against the gun's time.
+    private func judge(_ observation: MovementObservation, profile: StartProfile) {
+        let athleteID = observation.athleteID
         let position = athleteID.flatMap { roster?.position(of: $0) }
         
         // An interval that ends with the frame that made the movement
@@ -608,9 +586,15 @@ final class StarterEngine {
     /// by now the athletes are running, and this app is for training, where
     /// a wrong recall is worse than a missed one.
     private func handleRefinement(_ refinement: OnsetRefinement) {
+        if isRunning, heldMovements.contains(where: { $0.athleteID == refinement.athleteID }) {
+            heldRefinements.append(refinement)
+            return
+        }
+        
         guard isRunning,
               let index = athleteResults.firstIndex(where: { $0.athleteID == refinement.athleteID }),
               !athleteResults[index].isRefined,
+              !refinement.beganAfter(athleteResults[index].movement),
               cameraFailedAfter.map({ refinement.onset.latest <= $0 }) ?? true else {
             return
         }
@@ -700,7 +684,7 @@ final class StarterEngine {
     /// against an athlete: not on a wireless output whose delay was never
     /// measured, and not when the gun could not be read back.
     private var gunTimeIsTrusted: Bool {
-        !gunWasNotMeasured && scheduledGun?.basis.isCalibrationMissing != true
+        gunReadBack != .failed && scheduledGun?.basis.isCalibrationMissing != true
     }
     
     /// Counts the gun as fired once it can no longer be taken back, even if
@@ -714,7 +698,52 @@ final class StarterEngine {
         gunTime = gun.audibleOnset
         record(.gunCommitted, at: gun.audibleOnset, source: .audioLocal)
 
+        readBack(gun)
         listen(for: gun)
+    }
+
+    /// Reads the gun back once it has been rendered for a moment, on its
+    /// own task: a recall cancels the sequence, but not the read-back the
+    /// held movements wait for. Counted from the render start, not from the
+    /// commit: the cancellation lead (two I/O buffers and 5 ms, 47.7 ms at
+    /// the 21.3 ms measured) can be longer than the delay, and before its
+    /// first rendered sample the player has nothing to read back.
+    private func readBack(_ gun: ScheduledSignal) {
+        let at = MonotonicTimestamp(seconds: gun.renderStart.seconds + min(Self.gunMeasurementDelay, player.duration(of: gun.signal)))
+        gunReadBack = .pending
+
+        gunReadBackTask = Task { [weak self] in
+            guard let self, await self.sleep(until: at), self.gunReadBack == .pending else { return }
+
+            self.recordMeasuredGun()
+            self.judgeHeldMovements()
+        }
+    }
+
+    private func judgeHeldMovements() {
+        let held = heldMovements
+        heldMovements = []
+
+        guard let profile = currentSession?.profile else { return }
+
+        for observation in held {
+            judge(observation, profile: profile)
+        }
+
+        let refinements = heldRefinements
+        heldRefinements = []
+
+        for refinement in refinements {
+            handleRefinement(refinement)
+        }
+    }
+
+    private func resetGunReadBack() {
+        gunReadBackTask?.cancel()
+        gunReadBackTask = nil
+        gunReadBack = nil
+        heldMovements = []
+        heldRefinements = []
     }
 
     /// Has the microphone check what the model says about the gun. Its
@@ -830,6 +859,15 @@ final class StarterEngine {
         
         sequenceTask?.cancel()
         
+        // Read back before the stop ends the gun's playback. The movements
+        // held for it are judged once the recall is under way, so that one
+        // of them can't start a second recall.
+        let readsBackNow = gunReadBack == .pending
+        if readsBackNow {
+            gunReadBackTask?.cancel()
+            recordMeasuredGun()
+        }
+        
         player.stop()
         
         // A gun that was still pending is taken back by that.
@@ -851,6 +889,10 @@ final class StarterEngine {
             guard !Task.isCancelled, await self.sleep(until: collectUntil) else { return }
             
             self.endRun(outcome: .falseStart)
+        }
+        
+        if readsBackNow {
+            judgeHeldMovements()
         }
     }
     
@@ -900,15 +942,11 @@ final class StarterEngine {
                 // Already playing from the schedule.
                 commitGunIfDue()
                 
-                // Read back early: the estimate extrapolates over the time
-                // since the start, so any clock drift grows with it.
-                let duration = player.duration(of: .go)
-                let measureAfter = min(Self.gunMeasurementDelay, duration)
+                guard await sleep(for: player.duration(of: .go)) else { return .cancelled }
                 
-                guard await sleep(for: measureAfter) else { return .cancelled }
-                recordMeasuredGun()
-                guard await sleep(for: duration - measureAfter) else { return .cancelled }
-                guard await waitForReactions() else { return .cancelled }
+                // The reaction window runs from the gun's final time.
+                await gunReadBackTask?.value
+                guard !Task.isCancelled, await waitForReactions() else { return .cancelled }
 
                 // Usually over by now; the player bounds how long it takes.
                 await gunHearing?.value
@@ -932,7 +970,7 @@ final class StarterEngine {
     /// roster has moved or the reaction window is over. Without a roster
     /// there is no one to wait for. False if the run was cancelled.
     private func waitForReactions() async -> Bool {
-        guard let gunTime, isProbing || roster?.entries.isEmpty == false else { return true }
+        guard let gunTime, roster?.entries.isEmpty == false else { return true }
         
         let end = MonotonicTimestamp(seconds: gunTime.best.seconds + reactionWindow)
         
@@ -952,9 +990,7 @@ final class StarterEngine {
         while true {
             let readyBy = MonotonicTimestamp(seconds: clock.now().seconds + readinessTimeout)
             
-            // A measurement has no athletes to wait for, but it needs the
-            // camera as steady as a start does.
-            while (!isProbing && !movementDetector.isReady) || !cameraIsSteady {
+            while !movementDetector.isReady || !cameraIsSteady {
                 guard clock.now() < readyBy else {
                     guard cameraIsSteady else {
                         logger.notice("The camera did not get steady in time")
@@ -1153,17 +1189,27 @@ final class StarterEngine {
         
         guard let measured = player.measuredPlayback(of: .go) else {
             logger.error("Gun playback could not be measured")
-            gunWasNotMeasured = true
+            gunReadBack = .failed
             record(.gunPlaybackNotMeasured, source: .audioLocal)
             return
         }
         
+        gunReadBack = .measured
         record(.gunPlaybackMeasured, at: measured.audibleOnset, source: .audioLocal)
         
         let deviation = measured.renderStart.seconds - scheduled.renderStart.seconds
         
-        if abs(deviation) > OutputTiming.maximumScheduleDeviation {
-            logger.error("Gun started \(deviation * 1000, format: .fixed(precision: 3)) ms off its schedule")
+        // The read-back takes the output latency as it is now: a render on
+        // schedule can still be heard off the scheduled time.
+        let onsetDeviation = measured.audibleOnset.best.seconds - scheduled.audibleOnset.best.seconds
+        
+        if max(abs(deviation), abs(onsetDeviation)) > OutputTiming.maximumScheduleDeviation {
+            logger.error(
+                """
+                Gun started \(deviation * 1000, format: .fixed(precision: 3)) ms and is heard \
+                \(onsetDeviation * 1000, format: .fixed(precision: 3)) ms off its schedule
+                """
+            )
             
             // Most likely as measured, but wide enough for the schedule too,
             // so a reaction that depends on which is right stays uncertain.
@@ -1220,24 +1266,12 @@ final class StarterEngine {
             return
         }
         
-        // A measurement judges nobody: an athlete in view must not hold up
-        // or recall it.
-        let roster: AthleteRoster
-        if isProbing {
-            movementDetector.startProbing(probeRegions)
-            roster = .empty
-        } else {
-            roster = movementDetector.startMonitoring(profile: profile)
-        }
+        let roster = movementDetector.startMonitoring(profile: profile)
         self.roster = roster
         monitoringActive = true
 
         record(.monitoringStarted, source: .system)
         record(.rosterEstablished(roster), source: movementDetector.source)
-
-        if isProbing {
-            record(.probingStarted(probeRegions), source: movementDetector.source)
-        }
         
         // From the hold on: a false start can happen from here.
         if recordsVideo, recorder?.beginRecording() == true {

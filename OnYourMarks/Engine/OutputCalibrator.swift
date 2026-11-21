@@ -94,12 +94,18 @@ nonisolated enum CalibrationMath {
         window: ClosedRange<TimeInterval>,
         noiseWindow: ClosedRange<TimeInterval>
     ) -> DetectedOnset? {
-        let windowSamples = samples(in: chunks, during: window)
+        // Across a gap the attack may be missing, and its loud tail would
+        // pass for the onset: the search ends at the first one. The peak
+        // comes from everything the window holds, so a quiet sound before
+        // a gap is not measured against itself.
+        guard let covered = gaplessCoverage(of: window, in: chunks) else { return nil }
+
+        let windowSamples = samples(in: chunks, during: covered)
         let noiseSamples = samples(in: chunks, during: noiseWindow)
 
         guard !windowSamples.isEmpty, !noiseSamples.isEmpty else { return nil }
 
-        let peak = windowSamples.map { abs($0.value) }.max() ?? 0
+        let peak = samples(in: chunks, during: window).map { abs($0.value) }.max() ?? 0
         let noise = rms(noiseSamples.map(\.value))
 
         guard peak > 0, peak >= noise * minimumSignalToNoise else { return nil }
@@ -129,6 +135,32 @@ nonisolated enum CalibrationMath {
     /// Whether the recording holds any sample in the stretch.
     static func covers(_ chunks: [RecordedChunk], _ range: ClosedRange<TimeInterval>) -> Bool {
         chunks.contains { $0.end > range.lowerBound && $0.hostSeconds <= range.upperBound }
+    }
+
+    /// Larger steps between one chunk's end and the next chunk's start are
+    /// a gap. A dropout loses at least one tap buffer, 1024 samples
+    /// requested, 21 ms at 48 kHz; the timestamps of chunks that follow on
+    /// differ far less. Reasoned: the jitter between chunks is not measured.
+    static let maximumChunkGap: TimeInterval = 0.001
+
+    /// The part of the stretch the recording holds without a gap, from its
+    /// beginning on. Nil if the recording doesn't hold its beginning.
+    static func gaplessCoverage(
+        of range: ClosedRange<TimeInterval>,
+        in chunks: [RecordedChunk]
+    ) -> ClosedRange<TimeInterval>? {
+        let overlapping = chunks
+            .filter { $0.end > range.lowerBound && $0.hostSeconds <= range.upperBound }
+            .sorted { $0.hostSeconds < $1.hostSeconds }
+
+        guard let first = overlapping.first, first.hostSeconds <= range.lowerBound + maximumChunkGap else { return nil }
+
+        var coveredUntil = first.end
+        for chunk in overlapping.dropFirst() {
+            guard chunk.hostSeconds <= coveredUntil + maximumChunkGap else { break }
+            coveredUntil = max(coveredUntil, chunk.end)
+        }
+        return range.lowerBound ... min(range.upperBound, coveredUntil)
     }
 
     /// Median of the per-click offsets, and how far the clicks strayed from it.

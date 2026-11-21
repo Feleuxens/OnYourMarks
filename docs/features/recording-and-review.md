@@ -26,7 +26,7 @@ The header shows the frame number and its time from the gun: "Frame 80 of 117", 
 
 ### From the video
 
-After a recorded start the app analyses the whole video again in the background: a pose on every frame, not only those it had time for during the start, and the athlete's rest learned from the whole hold. The result is shown under the live time:
+After a recorded start the app analyses the whole video again in the background: a pose on every frame, not only those it had time for during the start, and the athlete's rest learned from the whole hold. As during the start, a movement needs two poses in a row: one wrong pose is not taken for the start. If two athletes stood so close that the video's poses could belong to either, neither gets them. A change in the pictures that began only after the poses had moved is not taken for the start either. The result is shown under the live time:
 
 "From the video: 148 ms ± 5 ms"
 

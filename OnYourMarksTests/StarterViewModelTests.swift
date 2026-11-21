@@ -587,6 +587,7 @@ struct StarterViewModelTests {
 
         vm.start()
         await waitUntil { vm.engine.state == .start }
+        await waitForGunReadBack(vm.engine)
 
         // Certainly moving 150 ms after now, last seen at rest 20 ms before that.
         let moved = CACurrentMediaTime() + 0.15
