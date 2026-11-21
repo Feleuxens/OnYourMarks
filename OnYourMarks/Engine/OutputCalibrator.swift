@@ -276,7 +276,6 @@ nonisolated extension RecordedChunk {
 
 /// Records the built-in microphone on its own engine, so the playback
 /// engine and its graph stay exactly as they are for starts.
-@MainActor
 final class MicrophoneRecorder {
     private let engine = AVAudioEngine()
     private let store: RecordedChunkStore

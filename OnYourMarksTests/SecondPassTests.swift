@@ -392,8 +392,8 @@ extension VideoRecordingTests {
             try #require(summary.frameTimes.count > 2)
 
             var read: [(time: MonotonicTimestamp, brightness: Int)] = []
-            let result = try await RecordedVideoReader.read(url, frameTimes: summary.frameTimes) { buffer, time in
-                read.append((time, brightness(of: buffer)))
+            let result = try await RecordedVideoReader.read(url, frameTimes: summary.frameTimes) { picture, time in
+                read.append((time, picture.withUnsafeBuffer { brightness(of: $0) }))
             }
 
             #expect(result.decoded == summary.frameTimes.count)

@@ -7,9 +7,9 @@ import CoreVideo
 import Foundation
 
 /// One video frame and when it was captured.
-nonisolated struct CameraFrame: @unchecked Sendable {
-    /// Only read by consumers, never modified.
-    let pixelBuffer: CVPixelBuffer
+nonisolated struct CameraFrame: Sendable {
+    /// Read-only, which is what lets every consumer have it at once.
+    let picture: CVReadOnlyPixelBuffer
 
     /// The frame's capture timestamp on the host clock, the same clock
     /// the audio schedule uses.
@@ -17,6 +17,23 @@ nonisolated struct CameraFrame: @unchecked Sendable {
 
     /// Counts delivered frames since the camera was configured.
     let index: Int
+
+    init(picture: CVReadOnlyPixelBuffer, timestamp: MonotonicTimestamp, index: Int) {
+        self.picture = picture
+        self.timestamp = timestamp
+        self.index = index
+    }
+
+    /// Whoever hands the buffer over must not write to it afterwards.
+    init(pixelBuffer: sending CVPixelBuffer, timestamp: MonotonicTimestamp, index: Int) {
+        self.init(picture: CVReadOnlyPixelBuffer(unsafeBuffer: pixelBuffer), timestamp: timestamp, index: index)
+    }
+
+    /// The pixels, for reading only and only inside `body`: keeping one of
+    /// the camera's buffers stalls the capture.
+    func withPixelBuffer<R>(_ body: (CVPixelBuffer) throws -> sending R) rethrows -> sending R {
+        try picture.withUnsafeBuffer(body)
+    }
 }
 
 nonisolated enum FrameDropReason: Sendable {

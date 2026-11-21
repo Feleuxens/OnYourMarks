@@ -94,7 +94,7 @@ struct SoundBufferTests {
     /// files' edit lists don't mark it):
     /// gun 23.63 ms, set 42.11 ms, on your marks 29.48 ms.
     /// If AVAudioFile trims the priming instead, the onsets are ~23.2 ms
-    /// earlier. The printed values tell us which one the device plays.
+    /// earlier. The attached values tell us which one the device plays.
     @Test(arguments: SoundTheme.allCases, Signal.allCases)
     @MainActor
     func bundledSignalDecodesWithPlausibleOnset(theme: SoundTheme, signal: Signal) throws {
@@ -111,9 +111,9 @@ struct SoundBufferTests {
         
         #expect(onset < 0.1, "\(name) onset \(onset) s is later than expected")
         
-        print(
-            "[SoundBufferTests] \(name): \(buffer.format.sampleRate) Hz, "
-            + "\(buffer.frameLength) frames, onset \(onset * 1000) ms"
+        Attachment.record(
+            "\(name): \(buffer.format.sampleRate) Hz, \(buffer.frameLength) frames, onset \(onset * 1000) ms",
+            named: "Onset \(name)"
         )
     }
 }

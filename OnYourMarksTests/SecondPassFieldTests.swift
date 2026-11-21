@@ -36,12 +36,12 @@ struct SecondPassFieldTests {
         var diagnosis = "no frame"
 
         do {
-            _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { buffer, frameTime in
+            _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { picture, frameTime in
                 guard frameTime.seconds >= time else { return }
 
                 let request = VNDetectHumanBodyPoseRequest()
                 do {
-                    try VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .right).perform([request])
+                    try picture.withUnsafeBuffer { try VNImageRequestHandler(cvPixelBuffer: $0, orientation: .right).perform([request]) }
                     diagnosis = "\(request.results?.count ?? 0) bodies, no error"
                 } catch {
                     diagnosis = "error: \(error)"
@@ -132,16 +132,18 @@ struct SecondPassFieldTests {
                 let wanted = Set(record.samples.map { $0.time })
                 var decoded: [MonotonicTimestamp: [UInt8]] = [:]
 
-                _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { buffer, time in
+                _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { picture, time in
                     guard wanted.contains(time) else { return }
-                    decoded[time] = MotionSampler.cells(
-                        of: buffer,
-                        in: MotionSampler.bufferRegion(
-                            for: record.region,
-                            bufferWidth: CVPixelBufferGetWidth(buffer),
-                            bufferHeight: CVPixelBufferGetHeight(buffer)
+                    decoded[time] = picture.withUnsafeBuffer { buffer in
+                        MotionSampler.cells(
+                            of: buffer,
+                            in: MotionSampler.bufferRegion(
+                                for: record.region,
+                                bufferWidth: CVPixelBufferGetWidth(buffer),
+                                bufferHeight: CVPixelBufferGetHeight(buffer)
+                            )
                         )
-                    )
+                    }
                 }
 
                 // Cell by cell.
@@ -247,17 +249,20 @@ struct SecondPassFieldTests {
             regions += start.motion.map { ("athlete region", $0.region) }
 
             var samples: [[MotionSample]] = Array(repeating: [], count: regions.count)
-            _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { buffer, time in
+            _ = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { picture, time in
                 guard time.seconds > gun.best.seconds - 2.5, time.seconds < gun.best.seconds + 0.5 else { return }
-                let width = CVPixelBufferGetWidth(buffer)
-                let height = CVPixelBufferGetHeight(buffer)
 
-                for (index, region) in regions.enumerated() {
-                    if let cells = MotionSampler.cells(
-                        of: buffer,
-                        in: MotionSampler.bufferRegion(for: region.1, bufferWidth: width, bufferHeight: height)
-                    ) {
-                        samples[index].append(MotionSample(time: time, cells: cells))
+                picture.withUnsafeBuffer { buffer in
+                    let width = CVPixelBufferGetWidth(buffer)
+                    let height = CVPixelBufferGetHeight(buffer)
+
+                    for (index, region) in regions.enumerated() {
+                        if let cells = MotionSampler.cells(
+                            of: buffer,
+                            in: MotionSampler.bufferRegion(for: region.1, bufferWidth: width, bufferHeight: height)
+                        ) {
+                            samples[index].append(MotionSample(time: time, cells: cells))
+                        }
                     }
                 }
             }

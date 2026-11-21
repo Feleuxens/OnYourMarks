@@ -87,12 +87,9 @@ nonisolated final class VideoFileWriter: Sendable {
 
             let time = VideoTimeline.presentationTime(of: frame.timestamp, first: first)
 
-            // The encoder only reads the buffer, like every consumer of a frame.
-            nonisolated(unsafe) let pixelBuffer = frame.pixelBuffer
-
             do {
                 // Never wait for the encoder: the analysis runs on this queue.
-                guard try receiver.appendImmediately(CVReadOnlyPixelBuffer(unsafeBuffer: pixelBuffer), with: time) else {
+                guard try receiver.appendImmediately(frame.picture, with: time) else {
                     state.summary.skippedFrames += 1
                     return nil
                 }
@@ -146,13 +143,14 @@ nonisolated final class VideoFileWriter: Sendable {
     /// Sets the file up for frames like the given one, the first of the recording.
     private static func open(_ state: inout State, at url: URL, for frame: CameraFrame) throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let (width, height) = frame.withPixelBuffer { (CVPixelBufferGetWidth($0), CVPixelBufferGetHeight($0)) }
 
         let input = AVAssetWriterInput(
             mediaType: .video,
             outputSettings: [
                 AVVideoCodecKey: AVVideoCodecType.hevc,
-                AVVideoWidthKey: CVPixelBufferGetWidth(frame.pixelBuffer),
-                AVVideoHeightKey: CVPixelBufferGetHeight(frame.pixelBuffer),
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [
                     AVVideoAverageBitRateKey: averageBitRate,
                     AVVideoMaxKeyFrameIntervalKey: maximumKeyFrameInterval,

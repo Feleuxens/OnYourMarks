@@ -8,8 +8,7 @@
 import SwiftUI
 
 @Observable
-@MainActor
-class StarterViewModel {
+final class StarterViewModel {
     var config: StartConfig {
         didSet {
             configStore.save(config)

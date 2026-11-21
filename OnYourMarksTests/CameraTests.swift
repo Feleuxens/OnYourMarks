@@ -371,14 +371,16 @@ struct CameraControllerTests {
 
             camera.setFrameHandler { frame in
                 let began = CACurrentMediaTime()
-                let width = CVPixelBufferGetWidth(frame.pixelBuffer)
-                let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+                frame.withPixelBuffer { buffer in
+                    let width = CVPixelBufferGetWidth(buffer)
+                    let height = CVPixelBufferGetHeight(buffer)
 
-                for region in regions {
-                    _ = MotionSampler.cells(
-                        of: frame.pixelBuffer,
-                        in: MotionSampler.bufferRegion(for: region, bufferWidth: width, bufferHeight: height)
-                    )
+                    for region in regions {
+                        _ = MotionSampler.cells(
+                            of: buffer,
+                            in: MotionSampler.bufferRegion(for: region, bufferWidth: width, bufferHeight: height)
+                        )
+                    }
                 }
                 samplingDurations.withLock { $0.append(CACurrentMediaTime() - began) }
 

@@ -4,6 +4,7 @@
 //
 
 import CoreVideo
+import Synchronization
 import Vision
 
 /// What the camera's own movement did to a frame.
@@ -32,18 +33,22 @@ nonisolated enum CameraShift: Equatable, Sendable {
 ///
 /// A first, simple compensation: translation only, no rotation or zoom, and
 /// athletes filling much of the picture pull the estimate towards themselves.
-///
-/// Not thread-safe: use it from one queue only, here the pose queue.
-nonisolated final class CameraMotionEstimator: @unchecked Sendable {
+nonisolated final class CameraMotionEstimator: Sendable {
     /// A shift beyond this share of the picture is not a hand's tremor but
     /// a pan or a failed measurement; either way nothing to correct by.
     /// Reasoned, not measured.
     static let maximumOffset: CGFloat = 0.2
 
-    /// A copy: holding on to one of the camera's own buffers stalls the
-    /// capture (measured: 18 frames in 3 s instead of about 240).
-    private var reference: CVPixelBuffer?
-    private var unmeasuredSince: MonotonicTimestamp?
+    private struct State {
+        /// A copy: holding on to one of the camera's own buffers stalls the
+        /// capture (measured: 18 frames in 3 s instead of about 240).
+        var reference: CVPixelBuffer?
+        var unmeasuredSince: MonotonicTimestamp?
+    }
+
+    /// Only ever used by one queue, the pose queue, so the lock is never
+    /// contended; it makes that a guarantee instead of a promise.
+    private let state = Mutex(State())
 
     /// How long the shift may stay unmeasurable before the reference is
     /// given up: as long as the tracker waits before it calls an athlete
@@ -53,33 +58,34 @@ nonisolated final class CameraMotionEstimator: @unchecked Sendable {
 
     /// The next frame becomes the reference.
     func reset() {
-        reference = nil
-        unmeasuredSince = nil
+        state.withLock { $0 = State() }
     }
 
     /// The shift of the frame's content against the reference; zero for
     /// the reference itself.
     func shift(in frame: CameraFrame) -> CameraShift {
-        guard let reference else {
-            self.reference = Self.copy(of: frame.pixelBuffer)
-            unmeasuredSince = nil
-            return .measured(.zero)
+        state.withLock { state in
+            guard let reference = state.reference else {
+                frame.withPixelBuffer { state.reference = Self.copy(of: $0) }
+                state.unmeasuredSince = nil
+                return .measured(.zero)
+            }
+
+            if let offset = frame.withPixelBuffer({ Self.offset(from: reference, to: $0) }) {
+                state.unmeasuredSince = nil
+                return .measured(offset)
+            }
+
+            guard let unmeasuredSince = state.unmeasuredSince else {
+                state.unmeasuredSince = frame.timestamp
+                return .unmeasured
+            }
+
+            guard frame.timestamp.seconds - unmeasuredSince.seconds > Self.patience else { return .unmeasured }
+
+            state = State()
+            return .lost
         }
-
-        if let offset = Self.offset(from: reference, to: frame.pixelBuffer) {
-            unmeasuredSince = nil
-            return .measured(offset)
-        }
-
-        guard let unmeasuredSince else {
-            unmeasuredSince = frame.timestamp
-            return .unmeasured
-        }
-
-        guard frame.timestamp.seconds - unmeasuredSince.seconds > Self.patience else { return .unmeasured }
-
-        reset()
-        return .lost
     }
 
     /// Nil if the registration fails or finds a shift too large to correct by.

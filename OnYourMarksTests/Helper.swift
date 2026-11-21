@@ -696,6 +696,11 @@ extension CameraFrame {
     /// A frame in the camera's pixel format, lying on its side like the
     /// camera's, grey with a brightness that depends on the index.
     static func synthetic(at time: TimeInterval, index: Int = 0, width: Int = 640, height: Int = 360) throws -> CameraFrame {
+        CameraFrame(pixelBuffer: try syntheticBuffer(index: index, width: width, height: height), timestamp: MonotonicTimestamp(seconds: time), index: index)
+    }
+
+    /// The picture of `synthetic(at:index:width:height:)`, still to be drawn on.
+    static func syntheticBuffer(index: Int = 0, width: Int = 640, height: Int = 360) throws -> CVPixelBuffer {
         var created: CVPixelBuffer?
         CVPixelBufferCreate(
             nil,
@@ -715,7 +720,7 @@ extension CameraFrame {
             memset(base, Int32(value), CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) * CVPixelBufferGetHeightOfPlane(buffer, plane))
         }
         
-        return CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: time), index: index)
+        return buffer
     }
 }
 

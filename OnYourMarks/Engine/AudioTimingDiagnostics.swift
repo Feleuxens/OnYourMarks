@@ -36,7 +36,6 @@ nonisolated struct AudioTimingSnapshot: Sendable {
     let currentClockDifference: TimeInterval
 }
 
-@MainActor
 final class AudioTimingDiagnostics {
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",

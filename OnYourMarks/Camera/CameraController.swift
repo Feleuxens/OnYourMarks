@@ -905,7 +905,11 @@ private nonisolated final class FrameReceiver: NSObject, AVCaptureVideoDataOutpu
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // The camera writes to the buffer only before it hands it over, and
+        // takes it back once the last reader has let go: from here on it is
+        // read only, which is the frame's read-only buffer's promise.
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        nonisolated(unsafe) let pixelBuffer = buffer
 
         let arrived = CACurrentMediaTime()
         let timestamp = hostSeconds(of: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))

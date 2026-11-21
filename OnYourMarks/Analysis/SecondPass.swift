@@ -115,23 +115,27 @@ nonisolated enum SecondPass {
     /// Reduces a decoded frame to what the analysis needs, so that the
     /// buffer can go at once.
     static func frame(
-        _ buffer: CVPixelBuffer,
+        _ picture: CVReadOnlyPixelBuffer,
         at time: MonotonicTimestamp,
         index: Int,
         regions: [AthleteID: CGRect],
         poses detector: any PoseDetecting
     ) -> Frame {
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
+        let frame = CameraFrame(picture: picture, timestamp: time, index: index)
 
         return Frame(
             time: time,
-            poses: detector.poses(in: CameraFrame(pixelBuffer: buffer, timestamp: time, index: index)),
-            cells: regions.compactMapValues {
-                MotionSampler.cells(
-                    of: buffer,
-                    in: MotionSampler.bufferRegion(for: $0, bufferWidth: width, bufferHeight: height)
-                )
+            poses: detector.poses(in: frame),
+            cells: frame.withPixelBuffer { buffer in
+                let width = CVPixelBufferGetWidth(buffer)
+                let height = CVPixelBufferGetHeight(buffer)
+
+                return regions.compactMapValues {
+                    MotionSampler.cells(
+                        of: buffer,
+                        in: MotionSampler.bufferRegion(for: $0, bufferWidth: width, bufferHeight: height)
+                    )
+                }
             }
         )
     }
@@ -463,8 +467,8 @@ nonisolated struct SecondPassAnalyser: RecordingAnalyser {
         let regions = plan.regions
         var frames: [SecondPass.Frame] = []
 
-        let video = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { buffer, time in
-            frames.append(SecondPass.frame(buffer, at: time, index: frames.count, regions: regions, poses: detector))
+        let video = try await RecordedVideoReader.read(start.videoURL, frameTimes: start.recording.frameTimes) { picture, time in
+            frames.append(SecondPass.frame(picture, at: time, index: frames.count, regions: regions, poses: detector))
         }
 
         return SecondPass.analyse(

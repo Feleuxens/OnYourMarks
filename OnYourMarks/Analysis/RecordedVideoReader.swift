@@ -26,8 +26,8 @@ nonisolated enum RecordedVideoReader {
 
     /// Decodes every frame in the order shown and hands it to `body` with the
     /// capture time stored for its place in the video (`VideoTimeline`):
-    /// the time the live analysis gave the same frame. The buffer lies on
-    /// its side like the camera's and is only valid inside `body`.
+    /// the time the live analysis gave the same frame. The picture lies on
+    /// its side like the camera's.
     ///
     /// A frame whose place matches no stored time exactly is counted and
     /// passed over: then the video and its frame times disagree, and no
@@ -37,7 +37,7 @@ nonisolated enum RecordedVideoReader {
     static func read(
         _ url: URL,
         frameTimes: [MonotonicTimestamp],
-        _ body: (CVPixelBuffer, MonotonicTimestamp) throws -> Void
+        _ body: (CVReadOnlyPixelBuffer, MonotonicTimestamp) throws -> Void
     ) async throws -> Summary {
         let asset = AVURLAsset(url: url)
 
@@ -74,7 +74,7 @@ nonisolated enum RecordedVideoReader {
                 continue
             }
 
-            try picture.withUnsafeBuffer { try body($0, frameTimes[next]) }
+            try body(picture, frameTimes[next])
             next += 1
         }
         return summary

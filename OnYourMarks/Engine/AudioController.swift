@@ -8,7 +8,6 @@
 import AVFoundation
 import OSLog
 
-@MainActor
 final class AudioController: AudioSessionPlayer {
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "OnYourMarks",

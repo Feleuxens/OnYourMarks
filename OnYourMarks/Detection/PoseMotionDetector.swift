@@ -215,14 +215,16 @@ final class PoseMotionDetector: MovementDetector {
         let regions = motion.withLock { $0.regions }
         guard !regions.isEmpty else { return }
 
-        let width = CVPixelBufferGetWidth(frame.pixelBuffer)
-        let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+        let samples = frame.withPixelBuffer { buffer in
+            let width = CVPixelBufferGetWidth(buffer)
+            let height = CVPixelBufferGetHeight(buffer)
 
-        let samples = regions.compactMapValues { region in
-            MotionSampler.cells(
-                of: frame.pixelBuffer,
-                in: MotionSampler.bufferRegion(for: region, bufferWidth: width, bufferHeight: height)
-            ).map { MotionSample(time: frame.timestamp, cells: $0) }
+            return regions.compactMapValues { region in
+                MotionSampler.cells(
+                    of: buffer,
+                    in: MotionSampler.bufferRegion(for: region, bufferWidth: width, bufferHeight: height)
+                ).map { MotionSample(time: frame.timestamp, cells: $0) }
+            }
         }
 
         motion.withLock { timeline in

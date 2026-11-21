@@ -898,11 +898,9 @@ extension VideoRecordingTests {
     
         /// A frame with a bright block where the athlete's torso is.
         private func frame(at time: TimeInterval, index: Int, athletes: [TrackedAthlete]) throws -> CameraFrame {
-            let frame = try CameraFrame.synthetic(at: time, index: 0)
-            let buffer = frame.pixelBuffer
+            let buffer = try CameraFrame.syntheticBuffer()
         
             CVPixelBufferLockBaseAddress(buffer, [])
-            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         
             let width = CVPixelBufferGetWidth(buffer)
             let height = CVPixelBufferGetHeight(buffer)
@@ -920,7 +918,11 @@ extension VideoRecordingTests {
                     }
                 }
             }
-            return frame
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+
+            // Drawn on and never touched again.
+            nonisolated(unsafe) let drawn = buffer
+            return CameraFrame(pixelBuffer: drawn, timestamp: MonotonicTimestamp(seconds: time), index: 0)
         }
     
         @Test(.enabled(if: seedRequested))

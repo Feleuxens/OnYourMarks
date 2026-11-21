@@ -66,7 +66,7 @@ struct CameraMotionTests {
         #expect(abs(down.y) < 0.000_001)
     }
 
-    private func frame(_ buffer: CVPixelBuffer, at seconds: TimeInterval) -> CameraFrame {
+    private func frame(_ buffer: sending CVPixelBuffer, at seconds: TimeInterval) -> CameraFrame {
         CameraFrame(pixelBuffer: buffer, timestamp: MonotonicTimestamp(seconds: seconds), index: 0)
     }
 

@@ -3,12 +3,11 @@
 //  OnYourMarks
 //
 
+import Synchronization
 import Vision
 
 /// Finds the bodies in a frame and their joints.
-///
-/// Not thread-safe: use it from one queue only, here the pose queue.
-nonisolated final class PoseTracker: @unchecked Sendable {
+nonisolated final class PoseTracker: Sendable {
     static let jointsOfInterest: [VNHumanBodyPoseObservation.JointName] = [
         .root, .neck,
         .leftHip, .rightHip,
@@ -21,27 +20,33 @@ nonisolated final class PoseTracker: @unchecked Sendable {
 
     static let minimumConfidence: Float = 0.3
 
-    private let request = VNDetectHumanBodyPoseRequest()
+    /// Only ever used by one queue, the pose queue, so the lock is never
+    /// contended; it makes that a guarantee instead of a promise.
+    private let request = Mutex(VNDetectHumanBodyPoseRequest())
 
     /// Every body with at least one confidently detected joint.
     /// Empty if none was found.
     func poses(in frame: CameraFrame) -> [DetectedPose] {
-        let handler = VNImageRequestHandler(cvPixelBuffer: frame.pixelBuffer, orientation: .right)
+        request.withLock { request in
+            let (performed, aspectRatio) = frame.withPixelBuffer { buffer in
+                let handler = VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .right)
 
-        guard (try? handler.perform([request])) != nil, let observations = request.results else {
-            return []
-        }
+                // Vision sees the picture upright, turned from the buffer's landscape.
+                let aspectRatio = CGFloat(CVPixelBufferGetHeight(buffer)) / CGFloat(max(CVPixelBufferGetWidth(buffer), 1))
+                return ((try? handler.perform([request])) != nil, aspectRatio)
+            }
 
-        // Vision sees the picture upright, turned from the buffer's landscape.
-        let aspectRatio = CGFloat(CVPixelBufferGetHeight(frame.pixelBuffer))
-            / CGFloat(max(CVPixelBufferGetWidth(frame.pixelBuffer), 1))
+            guard performed, let observations = request.results else {
+                return []
+            }
 
-        return observations.compactMap { observation in
-            guard let points = try? observation.recognizedPoints(.all) else { return nil }
-            return Self.pose(
-                from: points.mapValues { (location: $0.location, confidence: $0.confidence) },
-                aspectRatio: aspectRatio
-            )
+            return observations.compactMap { observation in
+                guard let points = try? observation.recognizedPoints(.all) else { return nil }
+                return Self.pose(
+                    from: points.mapValues { (location: $0.location, confidence: $0.confidence) },
+                    aspectRatio: aspectRatio
+                )
+            }
         }
     }
 

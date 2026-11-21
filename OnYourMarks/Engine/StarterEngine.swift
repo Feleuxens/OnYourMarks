@@ -15,7 +15,6 @@ struct Phase: Equatable {
 }
 
 @Observable
-@MainActor
 final class StarterEngine {
     private(set) var state: StarterState = .idle
     private(set) var isRunning: Bool = false
